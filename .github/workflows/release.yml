@@ -49,13 +49,10 @@ jobs:
   publish-npmjs:
     name: Publish to npmjs
     needs: check
-    # npm provenance requires a public source repository; while this repo is
-    # private, rehearse releases against GitHub Packages only.
-    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # provenance attestation
+      id-token: write # OIDC: trusted-publishing auth + provenance attestation
     steps:
       - uses: actions/checkout@v6
 
@@ -64,18 +61,16 @@ jobs:
           node-version: "22"
           registry-url: https://registry.npmjs.org
 
-      # --ignore-scripts: the check job already gated this commit;
-      # prepublishOnly guards manual publishes, not CI. No install needed —
-      # the tarball is packed from the files allowlist with no build step.
-      #
-      # NPM_TOKEN is a granular automation token for the wdl-dev org.
-      # Tokenless alternative: configure npm trusted publishing (OIDC) for
-      # this repo + workflow on npmjs, upgrade npm to >= 11.5 in this job,
-      # and drop the NODE_AUTH_TOKEN line.
+      # Trusted publishing (OIDC) needs npm >= 11.5; Node 22 ships npm 10.
+      - run: npm install -g npm@latest
+
+      # Tokenless: auth is OIDC trusted publishing, configured on npmjs for
+      # this repo + release.yml. --ignore-scripts because the check job already
+      # gated this commit (prepublishOnly guards manual publishes, not CI), and
+      # the tarball packs from the files allowlist with no build step.
       - run: npm publish --ignore-scripts --provenance --access public --tag "$NPM_DIST_TAG"
         env:
           NPM_DIST_TAG: ${{ needs.check.outputs.dist-tag }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-github:
     name: Publish to GitHub Packages
@@ -100,10 +95,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    # The npmjs job legitimately skips while the repository is private, so
-    # gate on "nothing failed" rather than on every job succeeding.
     needs: [check, publish-npmjs, publish-github]
-    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

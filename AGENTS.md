@@ -90,10 +90,7 @@ version on a rehearsal:
 
    Pre-release versions publish under the `next` dist-tag, so
    `npm i -g @wdl-dev/cli` keeps resolving to the last stable release while
-   `@next` installs the candidate. While the repository is private, the npmjs
-   job skips itself (provenance requires a public repository) and the rehearsal
-   publishes to GitHub Packages, whose package visibility follows the
-   repository.
+   `@next` installs the candidate.
 
 2. When the candidate checks out, bump `version` to the final release (e.g.
    `1.0.0`), commit, tag `v1.0.0`, and push the tag.
@@ -111,13 +108,10 @@ Tag final releases with a signed annotated tag
 the matching `## 1.2.3` section before pushing — the GitHub Release notes come
 from it.
 
-npmjs authentication bootstraps on `NPM_TOKEN` (a granular automation token for
-the wdl-dev org) only because a trusted publisher cannot be configured for a
-package that does not exist yet. Once the first pre-release lands on npmjs:
-configure trusted publishing for this repository and `release.yml` in the npmjs
-package settings, upgrade npm to >= 11.5 inside the publish job, drop the
-`NODE_AUTH_TOKEN` line, and delete the token from both npmjs and the repository
-secrets. From then on publishing is OIDC-only.
+npmjs publishing is tokenless — OIDC trusted publishing, with the package's
+trusted publisher on npmjs bound to this repository and `release.yml`. The
+publish job carries `id-token: write` and upgrades npm to the version trusted
+publishing needs (>= 11.5); there is no `NPM_TOKEN`.
 
 ## Commit & Pull Request Guidelines
 

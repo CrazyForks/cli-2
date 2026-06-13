@@ -1,6 +1,6 @@
 {
   "name": "@wdl-dev/cli",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0",
   "description": "Tenant-facing CLI for deploying Cloudflare Workers-style projects, managing WDL resources, and tailing live worker logs.",
   "author": "The WDL Authors",
   "license": "Apache-2.0",
