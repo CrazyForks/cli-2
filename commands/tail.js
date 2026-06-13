@@ -1,0 +1,486 @@
+// `wdl tail <worker...>` — live SSE log stream against control's
+// /ns/<ns>/logs/tail endpoint. The transport shares controlRequestOptions
+// with lib/control-fetch.js but consumes the body as a stream so events
+// render as they arrive rather than at end-of-response.
+
+import http from "node:http";
+import https from "node:https";
+import { defineCommand } from "../lib/command.js";
+import { controlRequestOptions } from "../lib/control-fetch.js";
+import {
+  CliError,
+  defineCliOption,
+  escapeTerminalLines,
+  escapeTerminalText,
+  formatHelp,
+  isMain,
+  optionHelp,
+} from "../lib/common.js";
+
+const RECONNECT_INITIAL_MS = 1_000;
+const RECONNECT_MAX_MS = 5_000;
+const RECONNECT_STABLE_MS = 30_000;
+// Default for --max-reconnects: bail after this many consecutive
+// cap-stuck attempts. `--max-reconnects 0` disables the cap.
+const DEFAULT_MAX_RECONNECTS_AT_CAP = 10;
+const TAIL_ERROR_BODY_MAX_BYTES = 64 * 1024;
+// Socket-shutdown error shapes we tolerate as "our own abort".
+// Anything else (e.g. a 5xx racing the abort) bubbles to the user.
+const ABORT_TOLERATED_ERRORS = new Set([
+  "ECONNRESET", "ECONNABORTED", "EPIPE", "ABORT_ERR",
+]);
+
+const TAIL_OPTIONS = [
+  defineCliOption("raw", { type: "boolean" }, "--raw", "Emit one JSON object per line (no pretty-print)."),
+  defineCliOption("since", { type: "string" }, "--since <id>", "Resume from the given Redis stream id (single-worker only)."),
+  defineCliOption("max-reconnects", { type: "string" }, "--max-reconnects <N>", `Bail after N consecutive reconnect attempts that all stayed at the ${RECONNECT_MAX_MS}ms backoff cap (default ${DEFAULT_MAX_RECONNECTS_AT_CAP}, 0 = unlimited).`),
+  "ns",
+  "control",
+  "help",
+];
+
+function isExpectedAbortError(err) {
+  if (!err) return false;
+  if (err.name === "AbortError") return true;
+  if (typeof err.code === "string" && ABORT_TOLERATED_ERRORS.has(err.code)) return true;
+  return false;
+}
+
+const command = defineCommand({
+  name: "tail",
+  summary: "Live-tail worker console output and uncaught exceptions.",
+  options: TAIL_OPTIONS,
+  // tail writes line-at-a-time to both streams with an explicit newline.
+  defaults: {
+    stdout: (line) => process.stdout.write(line + "\n"),
+    stderr: (line) => process.stderr.write(line + "\n"),
+    transport: null,
+    sleepFn: sleep,
+    now: () => Date.now(),
+  },
+  usage: usageText,
+  run: runTail,
+});
+
+export const main = command.main;
+export const runTailCommand = command.run;
+export const meta = command.meta;
+
+/** @param {{ values: Record<string, any>, positionals: string[], context: import("../lib/command.js").CommandContext & { transport: any, sleepFn: (ms: number, signal?: AbortSignal) => Promise<void>, now: () => number } }} arg */
+async function runTail({ values, positionals, context }) {
+  const { stdout, stderr, transport, sleepFn, now } = context;
+
+  // Non-negative integer; 0 = unlimited. Reject other shapes loudly
+  // rather than silently falling back to the default.
+  let maxReconnectsAtCap = DEFAULT_MAX_RECONNECTS_AT_CAP;
+  if (values["max-reconnects"] !== undefined) {
+    const raw = values["max-reconnects"];
+    if (!/^\d+$/.test(raw)) {
+      throw new CliError(
+        `--max-reconnects must be a non-negative integer (got ${JSON.stringify(raw)}); ` +
+        `use 0 to disable the cap`,
+      );
+    }
+    maxReconnectsAtCap = Number(raw);
+  }
+
+  const ns = context.resolveNamespace();
+  if (!ns) throw new CliError(usageText());
+
+  if (positionals.length === 0) {
+    throw new CliError("Specify one or more worker names.");
+  }
+
+  const isMultiWorker = positionals.length > 1;
+  if (values.since && isMultiWorker) {
+    throw new CliError("--since is only valid for single-worker subscriptions.");
+  }
+
+  const { headers: baseHeaders } = context.resolveControl();
+  const tailBase = context.nsUrl("logs", "tail");
+  // `--since` only applies until the server has handed us an SSE id we can
+  // resume from. Keep it on the URL across reconnects until that point;
+  // once lastEventId is set, switch to the no-since URL and let
+  // Last-Event-ID carry the cursor so we never replay events already seen.
+  const initialUrl = buildTailUrl({
+    baseUrl: tailBase,
+    workers: positionals,
+    since: values.since,
+  });
+  const reconnectUrl = buildTailUrl({
+    baseUrl: tailBase,
+    workers: positionals,
+    since: undefined,
+  });
+  const raw = Boolean(values.raw);
+
+  // Single-worker sessions persist Last-Event-ID across in-process
+  // reconnect attempts so a network blip resumes from where we left off.
+  // Multi-worker sessions always fresh-start because one SSE cursor cannot
+  // represent several independent Redis Stream cursors.
+  let lastEventId = null;
+
+  const ctrl = new AbortController();
+  const onSig = () => ctrl.abort();
+  process.once("SIGINT", onSig);
+  process.once("SIGTERM", onSig);
+
+  let backoff = RECONNECT_INITIAL_MS;
+  let attempts = 0;
+  let consecutiveAtCap = 0;
+  try {
+    while (!ctrl.signal.aborted) {
+      const requestHeaders = { ...baseHeaders };
+      if (lastEventId && !isMultiWorker) {
+        requestHeaders["last-event-id"] = lastEventId;
+      }
+      // Transport-level errors (ECONNRESET / EPIPE / DNS / control
+      // restart) flow through the catch into the next reconnect
+      // attempt with the latest Last-Event-ID. CliError still
+      // propagates fatally, and a transport error AFTER user abort
+      // also propagates (something unexpected happened during the
+      // shutdown — the caller should see it).
+      let result;
+      let transportErr = null;
+      let connectedAt = null;
+      try {
+        const hasResumeCursor = lastEventId !== null;
+        result = await streamSse({
+          url: attempts === 0 || (values.since && !hasResumeCursor)
+            ? initialUrl
+            : reconnectUrl,
+          headers: requestHeaders, signal: ctrl.signal, transport,
+          // renderEvent writes stdout synchronously — fine for TTY
+          // backpressure; tail isn't a guaranteed-delivery surface.
+          onEvent: (event) => {
+            if (event.id) lastEventId = event.id;
+            renderEvent({ event, raw, stdout, stderr, isMultiWorker });
+          },
+          onConnected: () => {
+            connectedAt = now();
+            stderr(attempts === 0
+              ? "tail connected; waiting for events…"
+              : "tail reconnected; waiting for events…");
+          },
+        });
+      } catch (err) {
+        if (err instanceof CliError) throw err;
+        if (ctrl.signal.aborted) throw err;
+        transportErr = err;
+      }
+      attempts += 1;
+
+      if (ctrl.signal.aborted) break;
+      // Ended without a fatal error — server closed cleanly. For a 4xx /
+      // 5xx response with a JSON error body, surface it and exit instead
+      // of looping (the request would just keep failing).
+      if (result?.fatal) {
+        throw new CliError(result.fatal);
+      }
+      const connectedAtMs = connectedAt;
+      const connectionAgeMs = typeof connectedAtMs === "number" ? now() - connectedAtMs : 0;
+      const stableConnection = connectionAgeMs >= RECONNECT_STABLE_MS;
+      if (stableConnection) {
+        backoff = RECONNECT_INITIAL_MS;
+        consecutiveAtCap = 0;
+      }
+      if (transportErr) {
+        const detail = transportErr instanceof Error
+          ? `${transportErr.name}: ${transportErr.message}`
+          : String(transportErr);
+        stderr(`tail transport error (${detail}); will reconnect`);
+      }
+      // Only stable sessions reset consecutiveAtCap. A flapping network can
+      // establish TCP/TLS and still die quickly; keep backing off there.
+      if (backoff >= RECONNECT_MAX_MS) {
+        consecutiveAtCap += 1;
+        if (maxReconnectsAtCap > 0 && consecutiveAtCap >= maxReconnectsAtCap) {
+          throw new CliError(
+            `tail: gave up after ${consecutiveAtCap} consecutive reconnects ` +
+            `failed at the ${RECONNECT_MAX_MS}ms backoff cap ` +
+            `(override with --max-reconnects N, or 0 to disable)`,
+          );
+        }
+      }
+      stderr(`tail disconnected; reconnecting in ${backoff}ms…`);
+      await sleepFn(backoff, ctrl.signal);
+      backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
+    }
+  } finally {
+    process.off("SIGINT", onSig);
+    process.off("SIGTERM", onSig);
+  }
+}
+
+function buildTailUrl({ baseUrl, workers, since }) {
+  const u = new URL(baseUrl);
+  for (const w of workers) u.searchParams.append("worker", w);
+  if (since) u.searchParams.set("since", since);
+  return u.toString();
+}
+
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const onAbort = () => { clearTimeout(t); resolve(); };
+    const t = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+// One SSE connection lifecycle. Returns when the body ends (clean) or on
+// a non-2xx status (returns {fatal} for caller to surface). Throws on
+// transport-level errors so the reconnect loop sees them.
+function streamSse({ url, headers, signal, transport, onEvent, onConnected }) {
+  let onAbort;
+  const promise = new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const lib = transport || (u.protocol === "https:" ? https : http);
+    const reqOpts = controlRequestOptions(u);
+    reqOpts.method = "GET";
+    reqOpts.headers = { ...reqOpts.headers, Accept: "text/event-stream", ...headers };
+
+    const req = lib.request(reqOpts, (res) => {
+      const status = res.statusCode || 0;
+      const onResponseError = (err) => {
+        if (signal?.aborted && isExpectedAbortError(err)) return resolve({});
+        reject(err);
+      };
+      res.on("error", onResponseError);
+      if (status < 200 || status >= 300) {
+        const chunks = [];
+        let total = 0;
+        res.on("data", (c) => {
+          total += c.length;
+          if (total <= TAIL_ERROR_BODY_MAX_BYTES) chunks.push(c);
+        });
+        res.on("end", () => {
+          let detail;
+          try {
+            const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            detail = escapeTerminalText(body.message || body.error || `HTTP ${status}`);
+          } catch {
+            detail = `HTTP ${status}`;
+          }
+          resolve({ fatal: detail });
+        });
+        return;
+      }
+      onConnected?.();
+      const parser = new SseParser((event) => onEvent(event));
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => parser.push(chunk));
+      res.on("end", () => { parser.flush(); resolve({}); });
+    });
+    req.on("error", (err) => {
+      if (signal?.aborted && isExpectedAbortError(err)) return resolve({});
+      reject(err);
+    });
+    onAbort = () => { req.destroy(); };
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    req.end();
+  });
+  // Drop the session-long signal listener once this connection settles so a
+  // flapping reconnect loop doesn't accumulate one closure per attempt.
+  return signal
+    ? promise.finally(() => signal.removeEventListener("abort", onAbort))
+    : promise;
+}
+
+// Spec-style SSE line parser. Handles `event:`, `id:`, `data:` (multi-line
+// concatenated with `\n`), comments (`:`) and dispatches on blank line.
+// Field-value parse rule: optional single space after the colon is
+// trimmed (per W3C SSE spec).
+export class SseParser {
+  constructor(onEvent) {
+    this.onEvent = onEvent;
+    this.buffer = "";
+    this.event = "message";
+    this.id = null;
+    this.data = [];
+  }
+  push(chunk) {
+    this.buffer += chunk;
+    let idx;
+    while ((idx = this.buffer.indexOf("\n")) >= 0) {
+      let line = this.buffer.slice(0, idx);
+      this.buffer = this.buffer.slice(idx + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      this.consumeLine(line);
+    }
+  }
+  flush() {
+    if (this.buffer.length > 0) {
+      this.consumeLine(this.buffer);
+      this.buffer = "";
+    }
+    this.dispatch();
+  }
+  consumeLine(line) {
+    if (line === "") {
+      this.dispatch();
+      return;
+    }
+    if (line.startsWith(":")) return; // comment
+    const colon = line.indexOf(":");
+    let field, value;
+    if (colon < 0) { field = line; value = ""; }
+    else {
+      field = line.slice(0, colon);
+      value = line.slice(colon + 1);
+      if (value.startsWith(" ")) value = value.slice(1);
+    }
+    if (field === "event") this.event = value;
+    else if (field === "id") this.id = value;
+    else if (field === "data") this.data.push(value);
+    // unknown fields ignored per spec
+  }
+  dispatch() {
+    if (this.data.length === 0) {
+      // Reset event name even when there's no data so a subsequent
+      // event without an explicit `event:` line falls back to "message".
+      this.event = "message";
+      return;
+    }
+    this.onEvent({ event: this.event, id: this.id, data: this.data.join("\n") });
+    this.event = "message";
+    // SSE spec: `id` persists until a new id (or `id:` with empty value)
+    // overwrites it. We don't reset it.
+    this.data = [];
+  }
+}
+
+function renderEvent({ event, raw, stdout, stderr, isMultiWorker }) {
+  let payload;
+  try { payload = JSON.parse(event.data); }
+  catch { payload = { event: event.event, raw: event.data }; }
+
+  if (raw) {
+    stdout(JSON.stringify(payload));
+    return;
+  }
+
+  // Everything below interpolates worker-controlled text (console args,
+  // exception messages, request-derived fields) into the operator's
+  // terminal. Escape control sequences so a logged "\x1b]0;…" can't drive
+  // the terminal; multi-line payloads (console output, stacks) keep their
+  // newlines but every line is escaped.
+  const eventType = payload.event || event.event;
+  if (eventType === "tail_warning") {
+    stderr(`! tail_warning ${escapeTerminalText(payload.code || "")}: ${escapeTerminalText(payload.message || "")}`);
+    return;
+  }
+
+  const ts = typeof payload.ts === "number"
+    ? new Date(payload.ts).toISOString()
+    : new Date().toISOString();
+  const prefix = isMultiWorker && payload.worker ? `[${escapeTerminalText(payload.worker)}] ` : "";
+
+  if (eventType === "worker_console") {
+    const level = payload.console_level || "log";
+    stdout(`${prefix}${ts} ${escapeTerminalText(level)} ${escapeTerminalLines(formatConsoleArgs(payload.message))}`);
+    return;
+  }
+
+  if (eventType === "worker_exception") {
+    // workerd tail surfaces stack as the trimmed `at …` body without
+    // the "<name>: <message>\n" header. Always emit name+message, then
+    // append stack on its own line if present. If a future workerd
+    // version DOES prefix the header, strip it so we don't double-print.
+    const name = payload.name ? `${payload.name}: ` : "";
+    const headLine = `${name}${stringifyMessage(payload.message)}`;
+    stdout(`${prefix}${ts} exception ${escapeTerminalLines(headLine)}`);
+    if (typeof payload.stack === "string" && payload.stack.length > 0) {
+      const stack = payload.stack.startsWith(headLine + "\n")
+        ? payload.stack.slice(headLine.length + 1)
+        : payload.stack;
+      stdout(escapeTerminalLines(stack));
+    }
+    return;
+  }
+
+  if (eventType === "worker_scheduled") {
+    const bits = [`scheduled`, payload.phase || "event"];
+    if (payload.cron) bits.push(`cron=${JSON.stringify(payload.cron)}`);
+    if (payload.scheduled_time != null) bits.push(`scheduled_time=${payload.scheduled_time}`);
+    if (payload.outcome) bits.push(`outcome=${payload.outcome}`);
+    if (payload.duration_ms != null) bits.push(`duration_ms=${payload.duration_ms}`);
+    if (payload.error) bits.push(`error=${JSON.stringify(payload.error)}`);
+    stdout(`${prefix}${ts} ${escapeTerminalText(bits.join(" "))}`);
+    return;
+  }
+
+  if (eventType === "worker_queue") {
+    const bits = [`queue`, payload.phase || "event"];
+    if (payload.queue) bits.push(`name=${payload.queue}`);
+    if (payload.batch_size != null) bits.push(`batch_size=${payload.batch_size}`);
+    if (payload.outcome) bits.push(`outcome=${payload.outcome}`);
+    if (payload.duration_ms != null) bits.push(`duration_ms=${payload.duration_ms}`);
+    if (payload.error) bits.push(`error=${JSON.stringify(payload.error)}`);
+    stdout(`${prefix}${ts} ${escapeTerminalText(bits.join(" "))}`);
+    return;
+  }
+
+  if (eventType === "worker_fetch") {
+    const bits = [`fetch`, payload.phase || "event"];
+    if (payload.method) bits.push(`method=${payload.method}`);
+    const displayPath = formatFetchDisplayPath(payload);
+    if (displayPath) {
+      const truncated = payload.path_truncated ? " (truncated)" : "";
+      bits.push(`path=${JSON.stringify(displayPath)}${truncated}`);
+    }
+    if (payload.status != null) bits.push(`status=${payload.status}`);
+    if (payload.outcome) bits.push(`outcome=${payload.outcome}`);
+    if (payload.duration_ms != null) bits.push(`duration_ms=${payload.duration_ms}`);
+    if (payload.error) bits.push(`error=${JSON.stringify(payload.error)}`);
+    stdout(`${prefix}${ts} ${escapeTerminalText(bits.join(" "))}`);
+    return;
+  }
+
+  // Unknown event type — fall back to JSON so the user sees something.
+  stdout(`${prefix}${ts} ${escapeTerminalText(eventType)} ${escapeTerminalText(JSON.stringify(payload))}`);
+}
+
+function formatFetchDisplayPath(payload) {
+  if (typeof payload.path !== "string") return null;
+  if (typeof payload.worker !== "string" || payload.worker.length === 0) {
+    return payload.path;
+  }
+  const suffix = payload.path.startsWith("/") ? payload.path : `/${payload.path}`;
+  return suffix === "/" ? `/${payload.worker}/` : `/${payload.worker}${suffix}`;
+}
+
+// Workerd's tail event surfaces console.log("a", "b") as message=["a","b"]
+// (varargs preserved). Render "console.log-style": one arg unwrapped,
+// many args space-separated, each non-string lossless via JSON.
+function formatConsoleArgs(message) {
+  if (Array.isArray(message)) {
+    return message.map(stringifyMessage).join(" ");
+  }
+  return stringifyMessage(message);
+}
+
+function stringifyMessage(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  try { return JSON.stringify(value); } catch { return String(value); }
+}
+
+function usageText() {
+  return formatHelp({
+    usage: [
+      "wdl tail <worker> [<worker>...] [options]",
+    ],
+    description: "Live-tail worker console, exception, fetch, scheduled, and queue events in a namespace.",
+    options: optionHelp(TAIL_OPTIONS),
+  });
+}
+
+if (isMain(import.meta.url)) {
+  await main();
+}

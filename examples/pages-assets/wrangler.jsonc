@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pages-assets",
+  "main": "src/index.js",
+  "compatibility_date": "2026-05-31",
+
+  // Files under ./public are uploaded to the platform asset store; the
+  // worker uses env.ASSETS.url() to get CDN URLs back. Same field shape
+  // as Cloudflare Workers Assets.
+  "assets": {
+    "directory": "./public"
+  }
+}

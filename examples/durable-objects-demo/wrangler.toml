@@ -1,0 +1,11 @@
+name = "durable-objects-demo"
+main = "src/index.js"
+compatibility_date = "2026-05-31"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]

@@ -1,0 +1,20 @@
+name = "inspection-demo"
+main = "src/index.js"
+compatibility_date = "2026-05-31"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "inspection-images"
+
+[[kv_namespaces]]
+binding = "COUNTERS"
+id = "inspection-counters"
+
+# Create before deploy:
+#   wdl d1 create --ns <ns> inspection-main
+[[d1_databases]]
+binding = "DB"
+database_name = "inspection-main"
+
+[assets]
+directory = "./public"

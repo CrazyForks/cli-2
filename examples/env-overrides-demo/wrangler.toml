@@ -1,0 +1,23 @@
+name = "env-overrides-demo"
+main = "src/index.js"
+compatibility_date = "2026-05-31"
+
+[vars]
+BASE_ONLY = "top-level-only"
+SHARED = "top-level"
+
+[assets]
+directory = "./top-public"
+
+[env.preview]
+[env.preview.vars]
+ENV_NAME = "preview"
+SHARED = "preview"
+
+[env.production]
+[env.production.vars]
+ENV_NAME = "production"
+SHARED = "production"
+
+[env.production.assets]
+directory = "./prod-public"

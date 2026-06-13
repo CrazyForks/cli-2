@@ -1,0 +1,26 @@
+node_modules/
+.deploy-dist/
+.wrangler/
+.wrangler.wdl-tmp*.json
+examples/*/.deploy-dist/
+examples/*/.wrangler/
+examples/*/.wrangler.wdl-tmp*.json
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Demo workers are smoke tests only — their sole dep is wrangler; no
+# pinning value, just diff noise when `npm install` re-generates locks.
+examples/*/package-lock.json

@@ -1,0 +1,15 @@
+name = "d1-demo"
+main = "src/index.js"
+compatibility_date = "2026-05-31"
+
+# Create the database first:
+#   wdl d1 create main
+# Then apply migrations from this directory:
+#   wdl d1 migrations apply main
+[[d1_databases]]
+binding = "DB"
+database_name = "main"
+migrations_dir = "migrations"
+
+[vars]
+GREETING = "hello from d1-demo"

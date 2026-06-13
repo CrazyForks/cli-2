@@ -1,0 +1,11 @@
+name = "workflows-demo"
+main = "src/index.js"
+compatibility_date = "2026-05-31"
+
+[[workflows]]
+name = "orders"
+binding = "ORDERS"
+class_name = "OrderWorkflow"
+
+[vars]
+LABEL = "workflows-demo"

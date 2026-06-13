@@ -1,0 +1,1 @@
+hello from inherited top-level assets
