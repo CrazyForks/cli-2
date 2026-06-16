@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
 ### Added
 
@@ -49,6 +49,14 @@
 - `.env` values containing literal backslash escape sequences (e.g. a token
   with a backslash followed by `n`) now round-trip correctly instead of being
   decoded as control characters.
+
+### Security
+
+- Pinned `ws` to `^8.21.0` via npm `overrides` to clear GHSA-96hv-2xvq-fx4p in
+  the `wrangler` → `miniflare` → `ws` dependency chain, keeping `wrangler` on
+  v4. The DoS is reachable only through miniflare's dev server, which the CLI
+  never starts (it only runs `wrangler deploy --dry-run`), but the pin keeps the
+  dependency tree clean.
 
 ## 1.0.0
 
