@@ -13,14 +13,16 @@ import * as workflowsCmd from "../commands/workflows.js";
 import * as configCmd from "../commands/config.js";
 import * as doctorCmd from "../commands/doctor.js";
 import * as whoamiCmd from "../commands/whoami.js";
+import * as tokenCmd from "../commands/token.js";
 import { isHelpAlias } from "../lib/command.js";
-import { commonCliOptions, formatHelp, handleCliError, isMain, loadCliControlEnv } from "../lib/common.js";
+import { commonCliOptions, flagSet, formatHelp, handleCliError, isMain, loadCliControlEnv } from "../lib/common.js";
 import { currentCliVersion } from "../lib/package-info.js";
+import { readTokenStore, tokenStorePath } from "../lib/token-store.js";
 
 // Ordered for `wdl help`. Each entry carries its own { name, summary } metadata,
 // so the dispatch map and the help table below are both derived from it — no
 // command name or description is maintained twice.
-const REGISTRY = [initCmd, deployCmd, secretCmd, workersCmd, deleteCmd, d1Cmd, r2Cmd, tailCmd, workflowsCmd, configCmd, doctorCmd, whoamiCmd];
+const REGISTRY = [initCmd, deployCmd, secretCmd, workersCmd, deleteCmd, d1Cmd, r2Cmd, tailCmd, workflowsCmd, tokenCmd, configCmd, doctorCmd, whoamiCmd];
 
 // Alias -> canonical command name.
 const ALIASES = { secrets: "secret" };
@@ -65,7 +67,9 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
       loadCliControlEnv(env, {
         nsFromFlag: scanned.ns,
         tokenFromFlag: scanned.tokenFromFlag,
+        controlUrlFromFlag: scanned.controlUrlFromFlag,
         loadEnv: loadEnvOverride,
+        readStore: (e) => readTokenStore(tokenStorePath(e)),
       });
     } catch (err) {
       handleCliError(err);
@@ -94,7 +98,10 @@ function scanCommandArgs(commandModule, args) {
     // A non-empty --token means the effective credential is NOT the .env one
     // (an empty --token "" falls back to env), so the cross-origin guard must
     // distrust .env control endpoints. Matches config-state's detection.
-    tokenFromFlag: typeof values.token === "string" && values.token.length > 0,
+    tokenFromFlag: flagSet(values, "token"),
+    // A --control-url means the store need not be consulted to fill the
+    // endpoint, so a corrupt store cannot block a fully flag-supplied command.
+    controlUrlFromFlag: flagSet(values, "control-url"),
     help: values.help === true || isHelpAlias(positionals),
   };
 }

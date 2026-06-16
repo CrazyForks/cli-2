@@ -95,10 +95,11 @@ ADMIN_TOKEN=<acme-staging-token>
 ```
 
 The CLI loads only WDL platform variables from `.env`: `ADMIN_TOKEN`,
-`ADMIN_URL`, `CONTROL_URL`, `CONTROL_CONNECT_HOST`, and `WDL_NS`. Precedence is
-`CLI flag > shell/CI env > [resolved-ns] section > base .env`, and if none
-supplies a value the command fails — there is no built-in default. Namespace
-resolution is `--ns`, then `WDL_NS` from your shell or base `.env`. Section
+`CONTROL_URL`, `CONTROL_CONNECT_HOST`, and `WDL_NS`. Precedence is
+`CLI flag > shell/CI env > [resolved-ns] section > base .env > wdl token store`,
+and if none supplies a value the command fails — there is no built-in default.
+Namespace resolution is `--ns`, then `WDL_NS` from your shell or base `.env`,
+then the token store's default namespace. Section
 names may be normal tenant namespaces, such as `[acme]`, or opaque
 operator-reserved sections shaped like `[__name__]`. Tenant Wrangler config
 still uses normal tenant namespace grammar unless your operator explicitly gave
@@ -112,10 +113,16 @@ namespace resolves, section values are skipped and the command will fail
 normally if it needs a namespace or token. Pass `--ns` when you want to override
 the default for one command.
 
-Today these credentials come from your shell, a `.env` file, or flags. A future
-release (1.1) will add `wdl auth login`, which reads the token with hidden input
-and stores it in a managed config file, so it never lands in shell history or a
-project file.
+The recommended setup keeps these credentials in a managed store rather than a
+shell export or a project `.env`: `wdl token set --ns <ns> --control-url <url>`
+reads the token with
+hidden input, validates it against `/whoami`, and stores it under the namespace
+in `~/.config/wdl/credentials` (so it never lands in shell history or a project
+file). The store is the lowest-precedence layer — flags, shell env, and a
+project `.env` still win — and `wdl token list` / `wdl token rm` manage it. The
+first stored namespace becomes the default (a base `WDL_NS`, like a project
+`.env`'s), so commands run without `--ns`; `wdl token use <ns>` switches it. See
+[token.md](./docs/token.md).
 
 Use `wdl config explain` to inspect the final namespace, control URL, masked
 token, and where each value came from. Use `wdl whoami` to call control-plane
@@ -139,9 +146,10 @@ npm install
 
 It writes:
 
-- `package.json` — `npm run deploy` with `--ns` baked in, plus an
-  `npm run dry-run` local bundle check; pins `wrangler@^4` and `@wdl-dev/cli` as
-  devDependencies.
+- `package.json` — `npm run deploy` with `--ns` baked in when you pass it
+  (otherwise just `wdl deploy .`, with the namespace resolved at deploy time),
+  plus an `npm run dry-run` local bundle check; pins `wrangler@^4` and
+  `@wdl-dev/cli` as devDependencies.
 - `wrangler.jsonc` — top-level `name` is the worker name (defaults to the
   directory name; override with `--worker <name>`).
 - `src/index.js`, `.gitignore`, and `AGENTS.md`/`CLAUDE.md` so AI agents can
@@ -997,7 +1005,7 @@ wdl tail hello
 
 | Symptom                                                                | Likely cause                                                                                                        | What to check                                                                                                           |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `Missing admin token`                                                  | No tenant token was provided                                                                                        | Set `ADMIN_TOKEN` or pass `--token`                                                                                     |
+| `Missing admin token`                                                  | No tenant token was provided                                                                                        | Run `wdl token set --ns <ns> --control-url <url>` (recommended), set `ADMIN_TOKEN`, or pass `--token`                                                                                     |
 | `wrangler build failed`                                                | Wrangler could not bundle the Worker project                                                                        | Run `npx wrangler deploy --dry-run` inside the Worker project and fix local build/config errors                         |
 | Deploy succeeds but promote fails                                      | Route, custom host, or binding validation failed at promotion time                                                  | Check that custom hosts are enabled for your namespace and service-binding targets exist                                |
 | Worker URL returns 404                                                 | URL shape or worker name is wrong                                                                                   | Use `https://<namespace>.<platform-domain>/<worker-name>/`; include the worker name path segment                        |

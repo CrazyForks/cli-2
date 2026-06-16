@@ -31,6 +31,7 @@ package.
 | Scheduled / cron jobs                                 | `cron-triggers.md`   |
 | WDL environment override rules (preview / production) | `env-overrides.md`   |
 | Runtime secrets                                       | `secrets.md`         |
+| Storing control-plane tokens locally                  | `token.md`           |
 | Deploy / dry-run / list and delete workers            | `deploy.md`          |
 
 Open the relevant doc before editing `wrangler.jsonc` / `wrangler.toml` or
@@ -78,9 +79,11 @@ npx wrangler deploy --dry-run --outdir=.deploy-dist    # bundle check
 npm run deploy                                          # deploy to WDL
 ```
 
-`wdl init` bakes `--ns <ns>` into the `deploy` script in `package.json`. When
-you need environment overrides, add `[env.<name>]` config per `env-overrides.md`
-and pass `--env <name>` explicitly in the script.
+`wdl init` bakes `--ns <ns>` into the `deploy` script in `package.json` when you
+pass it; without `--ns` the script is `wdl deploy .` and the namespace is
+resolved at deploy time (`--ns`, `WDL_NS`, a project `.env`, or a `wdl token`
+default). When you need environment overrides, add `[env.<name>]` config per
+`env-overrides.md` and pass `--env <name>` explicitly in the script.
 
 To override `vars` / `assets` / bindings / `triggers` per environment, put them
 in the matching `env.<name>` block. WDL differs from Cloudflare Workers /
