@@ -61,8 +61,10 @@ jobs:
           node-version: "22"
           registry-url: https://registry.npmjs.org
 
-      # Trusted publishing (OIDC) needs npm >= 11.5; Node 22 ships npm 10.
-      - run: npm install -g npm@latest
+      # Trusted publishing (OIDC) needs npm >= 11.5; Node 22 ships npm 10. Not
+      # npm@latest: the job holds id-token: write, so a poisoned npm release would
+      # otherwise run here and could publish with provenance.
+      - run: npm install -g npm@11.17.0 --ignore-scripts
 
       # Tokenless: auth is OIDC trusted publishing, configured on npmjs for
       # this repo + release.yml. --ignore-scripts because the check job already

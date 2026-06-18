@@ -156,6 +156,30 @@ test("context.fetchJson throws a CliError on a non-2xx response", async () => {
   );
 });
 
+test("context.fetchJson escapes structured error context keys", async () => {
+  const cmd = define({
+    options: [],
+    usage: () => "",
+    run: ({ context }) => context.fetchJson("http://x", {}, "load"),
+  });
+  await assert.rejects(
+    () => cmd.run([], {
+      env: {},
+      controlFetch: async () => response({
+        error: "nope\u001b[31m",
+        "bad\u001b]52;c;Y2xpcGJvYXJk\u0007key": "value\u001b[32m",
+      }, 500),
+    }),
+    (err) => {
+      assert(err instanceof CliError);
+      assert.equal(err.message.includes("\u001b]52;c;Y2xpcGJvYXJk\u0007"), false);
+      assert.match(err.message, /nope\\u001b\[31m/);
+      assert.match(err.message, /bad\\u001b]52;c;Y2xpcGJvYXJk\\u0007key=value\\u001b\[32m/);
+      return true;
+    },
+  );
+});
+
 test("context.fetchStream returns the raw response after a status check", async () => {
   const ok = response("bytes");
   const cmd = define({
