@@ -132,6 +132,14 @@ first stored namespace becomes the default (a base `WDL_NS`, like a project
 `.env`'s), so commands run without `--ns`; `wdl token use <ns>` switches it. See
 [token.md](./docs/token.md).
 
+`wdl deploy` runs the project's local Wrangler dry-run and build hooks as your OS
+user before uploading, and that code can read the on-disk store (the env scrub
+keeps WDL variables out of the Wrangler child's environment, not out of the
+file), so only deploy projects you trust. `--no-token-store` (or
+`WDL_TOKEN_STORE=off`) resolves credentials from flags / shell / `.env` only and
+never reads the store — a resolution opt-out for less-trusted projects or CI, not
+protection for the file itself.
+
 Use `wdl config explain` to inspect the final namespace, control URL, masked
 token, and where each value came from. Use `wdl whoami` to call control-plane
 `/whoami` and display the authenticated principal, token id, platform version,

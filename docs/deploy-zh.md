@@ -36,6 +36,8 @@ CLI 需要三个值：
 
 优先级：`CLI 标志 > shell env > .env 中 [<ns>] 段 > .env 基础段 > wdl token store`。都没有提供时命令直接报错——没有内置默认值。
 
+**不可信项目：** `wdl deploy` 在上传前会以你的 OS 用户身份运行项目本地的 Wrangler dry-run 和 build 钩子，这些代码能读到磁盘上的 token store（凭证 scrub 只把 WDL 变量挡在 Wrangler 子进程环境外，挡不住文件）。只部署你信任的项目。对不可信 / 第三方项目，用临时的 `--token` / `--control-url` 加 `--no-token-store`（或 `WDL_TOKEN_STORE=off`）让 CLI 不读 store —— 而且根本别留全局 store，因为这个 flag 只是不**读**文件，挡不住文件本身在磁盘上。详见 [token-zh.md](./token-zh.md)。
+
 不确定最终取了哪个值时，运行 `wdl config explain`；要确认 token 实际连到哪个 control、principal、platform version 和 URL hints，运行 `wdl whoami`；本机与远端基础排查运行 `wdl doctor`。当 control 支持 `/whoami` 时，`doctor` 会验证远端 token、principal namespace、platform version 和 CLI compatibility。
 
 运行时密钥（与 `ADMIN_TOKEN` 不同）见 [secrets-zh.md](./secrets-zh.md)。
@@ -64,7 +66,7 @@ Worker 看到的路径是**剥掉 `/<worker-name>` 之后的路径**。除非运
 ## 标准部署流程
 
 1. **解析 CLI 调用形式**（上文）。
-2. **解析凭证** —— 优先用 `.env` 或 `wdl token` store，不要内联环境变量。
+2. **解析凭证** —— 可信项目优先用 `.env` 或 `wdl token` store，不要内联环境变量；不可信 / 第三方项目改用临时 `--token` / `--control-url` 加 `--no-token-store`（见上方凭证段 —— deploy 会以你的身份运行项目代码）。
 3. **wrangler 版本检查。** 打包步骤需要 `wrangler@^4`。如果项目 pin 了 v3，停下，告诉用户 —— 不要默默升级。
 4. **安装 worker 依赖**（在 worker 目录下 `npm install`），如果 `node_modules` 不存在。
 5. **预创建持久化绑定。** 读 wrangler 配置：

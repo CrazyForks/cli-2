@@ -3,7 +3,16 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { loadCliControlEnv, loadCliDotEnv, protectedEnvKeys, resolveControlContext, resolveControlUrl, resolveNamespace } from "../../lib/credentials.js";
+import { isTokenStoreDisabled, loadCliControlEnv, loadCliDotEnv, protectedEnvKeys, resolveControlContext, resolveControlUrl, resolveNamespace } from "../../lib/credentials.js";
+
+test("isTokenStoreDisabled honors the flag and WDL_TOKEN_STORE=off", () => {
+  assert.equal(isTokenStoreDisabled({}, false), false);
+  assert.equal(isTokenStoreDisabled({}, true), true);
+  assert.equal(isTokenStoreDisabled({ WDL_TOKEN_STORE: "off" }), true);
+  assert.equal(isTokenStoreDisabled({ WDL_TOKEN_STORE: "OFF" }), true);
+  assert.equal(isTokenStoreDisabled({ WDL_TOKEN_STORE: "on" }), false);
+  assert.equal(isTokenStoreDisabled({ WDL_TOKEN_STORE: "" }), false);
+});
 
 function emptyEnv() {
   return /** @type {NodeJS.ProcessEnv} */ ({});

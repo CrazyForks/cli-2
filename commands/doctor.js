@@ -5,6 +5,7 @@ import { defineCommand } from "../lib/command.js";
 import { CliError, formatHelp, isMain, isNonEmptyString, optionHelp } from "../lib/common.js";
 import { warnIfInsecureControlUrl } from "../lib/credentials.js";
 import { writeResult } from "../lib/output.js";
+import { readTokenStore, tokenStorePath } from "../lib/token-store.js";
 import { resolveCliConfigState } from "../lib/config-state.js";
 import { CLI_ROOT, readCliPackageJson } from "../lib/package-info.js";
 import {
@@ -48,6 +49,7 @@ async function runDoctor({ values, positionals, context }) {
     checkControlUrl(state),
     checkToken(state),
     checkNamespace(state),
+    checkTokenStore(state),
     checkWranglerConfig(context.cwd),
   ];
   const remote = await checkRemoteWhoami({
@@ -142,6 +144,37 @@ function checkNamespace(state) {
     ok: Boolean(state.namespace.value),
     label: state.namespace.value ? `Namespace ${state.namespace.display}` : "Namespace",
     detail: state.namespace.value ? `source: ${state.namespace.source}` : "Missing namespace. Set WDL_NS or pass --ns.",
+  });
+}
+
+function checkTokenStore(state) {
+  if (state.tokenStoreDisabled) {
+    // The opt-out promises the CLI never reads the store, so don't read it here
+    // either — but still flag (statically) that opting out doesn't remove the file.
+    return check({
+      ok: true,
+      label: "Token store disabled",
+      detail:
+        "WDL_TOKEN_STORE=off / --no-token-store — credentials resolve from flag/env/.env " +
+        "only. A store file on disk, if any, stays readable by project build code.",
+    });
+  }
+  let count = 0;
+  try {
+    const store = readTokenStore(tokenStorePath(state.env));
+    count = Object.keys(store.namespaces || {}).length;
+  } catch {
+    // A corrupt/unreadable store isn't a doctor failure; report it as absent.
+  }
+  if (count === 0) {
+    return check({ ok: true, label: "Token store none" });
+  }
+  return check({
+    ok: true,
+    label: `Token store ${count} namespace${count === 1 ? "" : "s"}`,
+    detail:
+      "readable by project build code during deploy (same OS user) — only deploy " +
+      "projects you trust; --no-token-store / WDL_TOKEN_STORE=off opts out.",
   });
 }
 

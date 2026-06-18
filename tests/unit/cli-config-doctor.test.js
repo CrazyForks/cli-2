@@ -74,6 +74,76 @@ test("resolveCliConfigState resolves the .env namespace over the store default g
   });
 });
 
+test("resolveCliConfigState ignores the token store with WDL_TOKEN_STORE=off / --no-token-store", () => {
+  withTempDir((cwd) => {
+    const xdg = path.join(cwd, "xdg");
+    writeTokenStore(tokenStorePath({ XDG_CONFIG_HOME: xdg }), {
+      defaultNs: "demo",
+      namespaces: { demo: { CONTROL_URL: "https://demo.store.example", ADMIN_TOKEN: "demo-store-token" } },
+    });
+
+    const baseline = resolveCliConfigState({ env: { WDL_NS: "", XDG_CONFIG_HOME: xdg }, cwd });
+    assert.equal(baseline.namespace.display, "demo", "baseline: store default namespace resolves");
+    assert.ok(baseline.token.value, "baseline: store token gap-fills");
+
+    const viaEnv = resolveCliConfigState({ env: { WDL_NS: "", XDG_CONFIG_HOME: xdg, WDL_TOKEN_STORE: "off" }, cwd });
+    assert.ok(!viaEnv.namespace.value, "WDL_TOKEN_STORE=off: no store default namespace");
+    assert.ok(!viaEnv.token.value, "WDL_TOKEN_STORE=off: no store token");
+
+    const viaFlag = resolveCliConfigState({ values: { "no-token-store": true }, env: { WDL_NS: "", XDG_CONFIG_HOME: xdg }, cwd });
+    assert.ok(!viaFlag.namespace.value, "--no-token-store: no store default namespace");
+  });
+});
+
+test("a project .env cannot disable the token store (WDL_TOKEN_STORE is not a .env key)", () => {
+  withTempDir((cwd) => {
+    const xdg = path.join(cwd, "xdg");
+    writeTokenStore(tokenStorePath({ XDG_CONFIG_HOME: xdg }), {
+      defaultNs: "demo",
+      namespaces: { demo: { CONTROL_URL: "https://demo.store.example", ADMIN_TOKEN: "demo-store-token" } },
+    });
+    writeFileSync(path.join(cwd, ".env"), "WDL_TOKEN_STORE=off\n");
+
+    const state = resolveCliConfigState({ env: { WDL_NS: "", XDG_CONFIG_HOME: xdg }, cwd });
+    assert.equal(state.namespace.display, "demo", ".env WDL_TOKEN_STORE=off is ignored; the store is still used");
+    assert.equal(state.tokenStoreDisabled, false, "the opt-out only reads the process env, not .env");
+  });
+});
+
+test("the dispatcher honors --no-token-store when autoloading credentials", async () => {
+  const oldExit = process.exit;
+  const oldError = console.error;
+  process.exit = (code) => { throw new Error(`exit:${code}`); };
+  console.error = () => {};
+  try {
+    await withTempDir(async (cwd) => {
+      const xdg = path.join(cwd, "xdg");
+      writeTokenStore(tokenStorePath({ XDG_CONFIG_HOME: xdg }), {
+        defaultNs: "demo",
+        namespaces: { demo: { CONTROL_URL: "http://ctl.test", ADMIN_TOKEN: "store-token" } },
+      });
+
+      // Assert what the dispatcher resolved from the store into the env it
+      // autoloads. loadEnv isolates .env; `secret` with no subcommand fails its
+      // arg check before any control fetch, so the command never hits the network.
+      const baseEnv = { XDG_CONFIG_HOME: xdg, WDL_NS: "" };
+      await wdlMain(["secret"], { env: baseEnv, loadEnv: () => [] }).catch(() => {});
+      assert.equal(baseEnv.WDL_NS, "demo", "store default namespace applied");
+      assert.equal(baseEnv.CONTROL_URL, "http://ctl.test", "store control URL gap-filled");
+      assert.equal(baseEnv.ADMIN_TOKEN, "store-token", "store token gap-filled");
+
+      const offEnv = { XDG_CONFIG_HOME: xdg, WDL_NS: "" };
+      await wdlMain(["secret", "--no-token-store"], { env: offEnv, loadEnv: () => [] }).catch(() => {});
+      assert.equal(offEnv.WDL_NS, "", "--no-token-store: no store default namespace");
+      assert.equal(offEnv.CONTROL_URL, undefined, "--no-token-store: no store control URL");
+      assert.equal(offEnv.ADMIN_TOKEN, undefined, "--no-token-store: no store token");
+    });
+  } finally {
+    process.exit = oldExit;
+    console.error = oldError;
+  }
+});
+
 
 test("config explain prints final values and sources", async () => {
   await withTempDir(async (cwd) => {
@@ -225,6 +295,56 @@ test("doctor reports local checks plus remote whoami", async () => {
       url: "https://api.wdl.dev/whoami",
       init: { headers: { "x-admin-token": "secret-token" } },
     }]);
+  });
+});
+
+test("doctor reports the token store namespace count and the build-readable caveat", async () => {
+  await withTempDir(async (cwd) => {
+    const xdg = path.join(cwd, "xdg");
+    writeTokenStore(tokenStorePath({ XDG_CONFIG_HOME: xdg }), {
+      defaultNs: "demo",
+      namespaces: {
+        demo: { CONTROL_URL: "http://ctl.test", ADMIN_TOKEN: "t1" },
+        other: { CONTROL_URL: "http://ctl.test", ADMIN_TOKEN: "t2" },
+      },
+    });
+    const lines = [];
+    await runDoctorCommand(["--ns", "demo", "--control-url", "http://ctl.test", "--token", "secret-token"], {
+      cwd,
+      env: { XDG_CONFIG_HOME: xdg },
+      execFile: () => "4.94.0\n",
+      stdout: (line) => lines.push(line),
+      controlFetch: async () =>
+        response({ ok: true, principal: { kind: "ns", ns: "demo" }, urls: { control: "http://ctl.test" } }),
+    });
+    const out = lines.join("\n");
+    assert.match(out, /Token store 2 namespaces/);
+    assert.match(out, /readable by project build code/);
+  });
+});
+
+test("doctor honors --no-token-store: reports the store disabled without reading it", async () => {
+  await withTempDir(async (cwd) => {
+    const xdg = path.join(cwd, "xdg");
+    writeTokenStore(tokenStorePath({ XDG_CONFIG_HOME: xdg }), {
+      defaultNs: "demo",
+      namespaces: { demo: { CONTROL_URL: "http://ctl.test", ADMIN_TOKEN: "t1" } },
+    });
+    const lines = [];
+    await runDoctorCommand(
+      ["--ns", "demo", "--control-url", "http://ctl.test", "--token", "secret-token", "--no-token-store"],
+      {
+        cwd,
+        env: { XDG_CONFIG_HOME: xdg },
+        execFile: () => "4.94.0\n",
+        stdout: (line) => lines.push(line),
+        controlFetch: async () =>
+          response({ ok: true, principal: { kind: "ns", ns: "demo" }, urls: { control: "http://ctl.test" } }),
+      },
+    );
+    const out = lines.join("\n");
+    assert.match(out, /Token store disabled/);
+    assert.doesNotMatch(out, /Token store \d+ namespace/);
   });
 });
 

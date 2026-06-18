@@ -61,6 +61,15 @@ Precedence: `CLI flag > shell env > .env [<ns>] section > .env base section > wd
 token store`. If none supplies a value, the command fails — there is no built-in
 default.
 
+**Untrusted projects:** `wdl deploy` runs the project's local Wrangler dry-run
+and build hooks as your OS user, so that code can read the on-disk token store
+(the credential scrub only keeps WDL variables out of the Wrangler child's
+environment, not out of the file). Only deploy projects you trust. For an
+untrusted or third-party project, pass an ephemeral `--token` / `--control-url`
+plus `--no-token-store` (or `WDL_TOKEN_STORE=off`) so the CLI ignores the store —
+and don't keep a global store at all, since the flag opts out of *reading* the
+file, not its presence on disk. See [token.md](./token.md).
+
 When unsure which value won, run `wdl config explain`; to confirm which control
 the token actually reaches, plus the principal, platform version, and URL hints,
 run `wdl whoami`; for baseline local and remote diagnostics, run `wdl doctor`.
@@ -98,8 +107,11 @@ you don't know which flag to use.
 ## Standard deploy flow
 
 1. **Resolve the CLI invocation form** (above).
-2. **Resolve credentials** — prefer `.env` or the `wdl token` store; do not
-   inline environment variables.
+2. **Resolve credentials** — for a trusted project, prefer `.env` or the `wdl
+   token` store; do not inline environment variables. For an untrusted or
+   third-party project, use an ephemeral `--token` / `--control-url` with
+   `--no-token-store` instead (see Credentials above — deploy runs project code
+   as you).
 3. **Wrangler version check.** The bundling step requires `wrangler@^4`. If the
    project pins v3, stop and tell the user — do not silently upgrade.
 4. **Install worker dependencies** (`npm install` in the worker directory) if

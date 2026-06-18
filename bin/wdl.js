@@ -16,9 +16,9 @@ import * as whoamiCmd from "../commands/whoami.js";
 import * as tokenCmd from "../commands/token.js";
 import { isHelpAlias } from "../lib/command.js";
 import { commonCliOptions, formatHelp, handleCliError, isMain } from "../lib/common.js";
-import { flagSet, loadCliControlEnv } from "../lib/credentials.js";
+import { flagSet, isTokenStoreDisabled, loadCliControlEnv } from "../lib/credentials.js";
 import { currentCliVersion } from "../lib/package-info.js";
-import { readTokenStore, tokenStorePath } from "../lib/token-store.js";
+import { tokenStoreReader } from "../lib/token-store.js";
 
 // Ordered for `wdl help`. Each entry carries its own { name, summary } metadata,
 // so the dispatch map and the help table below are both derived from it — no
@@ -70,7 +70,7 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
         tokenFromFlag: scanned.tokenFromFlag,
         controlUrlFromFlag: scanned.controlUrlFromFlag,
         loadEnv: loadEnvOverride,
-        readStore: (e) => readTokenStore(tokenStorePath(e)),
+        readStore: tokenStoreReader(isTokenStoreDisabled(env, scanned.noTokenStore)),
       });
     } catch (err) {
       handleCliError(err);
@@ -103,6 +103,7 @@ function scanCommandArgs(commandModule, args) {
     // A --control-url means the store need not be consulted to fill the
     // endpoint, so a corrupt store cannot block a fully flag-supplied command.
     controlUrlFromFlag: flagSet(values, "control-url"),
+    noTokenStore: values["no-token-store"] === true,
     help: values.help === true || isHelpAlias(positionals),
   };
 }

@@ -49,6 +49,12 @@ overrides the TCP target the admin token connects to (Host header + TLS SNI
 still track `CONTROL_URL`), and a stale value in a CI or production shell could
 route the token to an unintended host. GUIDE covers the details.
 
+`wdl deploy` runs the project's Wrangler dry-run and build hooks as the user, so
+they can read the on-disk token store (`~/.config/wdl/credentials`); only deploy
+trusted projects. For a less-trusted or third-party project, recommend
+`--no-token-store` (or `WDL_TOKEN_STORE=off`) with an ephemeral `--token` /
+`--control-url`, rather than relying on the global store.
+
 `templates/AGENTS.md` is the generic agent entrypoint that `wdl init` copies
 into every new project. It points at the same `docs/` through
 `node_modules/@wdl-dev/cli/docs/<name>.md` paths.

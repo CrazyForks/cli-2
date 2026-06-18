@@ -1060,6 +1060,9 @@ test("wdl dispatcher routes documented commands and rejects unknown commands", a
   try {
     await assert.rejects(() => wdlMain(["help"], { loadEnv: null }), /exit:0/);
     assert.ok(seen.at(-1).includes("wdl <command> [args] [options]"));
+    // Top-level help must list the common control flags too, matching command
+    // help — --no-token-store was missing here once.
+    assert.ok(seen.at(-1).includes("--no-token-store"), "top-level help lists --no-token-store");
     // The command table is derived from each command's { name, summary }; assert
     // the metadata content renders (and the alias note) without pinning column spacing.
     assert.ok(seen.at(-1).includes("Manage D1 databases, SQL execution, and migrations."));
