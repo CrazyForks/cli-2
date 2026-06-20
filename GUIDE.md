@@ -402,8 +402,9 @@ arrayBuffer/stream shapes before proxying.
 `list({ metadata: true })` returns per-key metadata without reading full values.
 Returned keys are not sorted, `limit` is a target page size capped at 1000, and
 the opaque WDL cursor must be passed back verbatim. KV values are capped at 25
-MiB before proxying; key byte-size is not currently capped to Cloudflare's
-512-byte limit.
+MiB before proxying, and keys (and list prefixes) are capped at 512 bytes,
+matching Cloudflare's limit — a longer key fails with `KV key exceeds 512 byte
+limit`.
 
 WDL KV writes are visible immediately. Expiring a key removes both value and
 metadata; putting the key again without an expiration clears the previous

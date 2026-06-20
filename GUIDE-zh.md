@@ -275,7 +275,7 @@ return Response.json({ count });
 
 支持常见 KV 操作：单 key `get`（text/json/arrayBuffer/stream value）、批量 `get`（text/json value）、`getWithMetadata`、批量 `getWithMetadata` （text/json value）、`put`、`delete`、`list` 和 `put(..., { expirationTtl | expiration })`。批量读取会在 proxy 前拒绝 arrayBuffer/stream shape。
 
-`list({ metadata: true })` 会返回每个 key 的 metadata，且不会读取完整 value。返回 key 不保证排序，`limit` 是目标页大小且最多 1000，不透明 WDL cursor 必须原样传回。KV value 在代理前限制为 25 MiB；key 的字节长度目前不会按 Cloudflare 的 512B 限制额外拦截。
+`list({ metadata: true })` 会返回每个 key 的 metadata，且不会读取完整 value。返回 key 不保证排序，`limit` 是目标页大小且最多 1000，不透明 WDL cursor 必须原样传回。KV value 在代理前限制为 25 MiB；key（和 list 前缀）的字节长度限制为 512B，与 Cloudflare 一致——超过会报 `KV key exceeds 512 byte limit`。
 
 WDL KV 写入会立即可见。key 过期时 value 和 metadata 会一起消失；不带过期时间重新 `put` 会清掉之前的过期设置。`cacheTtl` 会作为 Cloudflare KV API shape 被接受，但 WDL 没有 edge read cache，也没有全球最终一致性窗口，所以它不会改变读取行为。
 

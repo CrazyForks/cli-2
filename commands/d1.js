@@ -118,16 +118,16 @@ async function runD1({ values, positionals, context }) {
       throw new CliError(`--mode must be one of ${D1_EXECUTE_MODES.join(", ")}`);
     }
     let params;
-    if (values.params) {
+    if (values.params !== undefined) {
+      if (mode === "exec") {
+        throw new CliError("--mode exec does not accept --params");
+      }
       try {
         params = JSON.parse(values.params);
       } catch {
         throw new CliError("--params must be a JSON array");
       }
       if (!Array.isArray(params)) throw new CliError("--params must be a JSON array");
-      if (mode === "exec" && params.length > 0) {
-        throw new CliError("--mode exec does not accept --params");
-      }
     }
     const body = await context.fetchJson(context.nsUrl("d1", "databases", databaseRef, "query"), {
       method: "POST",

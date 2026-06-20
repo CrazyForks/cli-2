@@ -295,16 +295,26 @@ test("d1 execute rejects an unknown --mode before calling control", async () => 
   assert.equal(fetched, false);
 });
 
-test("d1 execute rejects --mode exec with --params before calling control", async () => {
+test("d1 execute rejects --mode exec with any --params before calling control", async () => {
   let fetched = false;
-  await assert.rejects(
-    () => runD1Command(["execute", "main", "--sql", "SELECT 1", "--mode", "exec", "--params", "[1]", "--control-url", "http://ctl.test"], {
-      env: { ADMIN_TOKEN: "tok", WDL_NS: "demo" },
-      stdout: () => {},
-      controlFetch: async () => { fetched = true; return response({}); },
-    }),
-    /--mode exec does not accept --params/
+  const run = (paramsJson) => runD1Command(
+    ["execute", "main", "--sql", "SELECT 1", "--mode", "exec", "--params", paramsJson, "--control-url", "http://ctl.test"],
+    { env: { ADMIN_TOKEN: "tok", WDL_NS: "demo" }, stdout: () => {}, controlFetch: async () => { fetched = true; return response({}); } }
   );
+  await assert.rejects(() => run("[1]"), /--mode exec does not accept --params/);
+  await assert.rejects(() => run("[]"), /--mode exec does not accept --params/);
+  await assert.rejects(() => run(""), /--mode exec does not accept --params/);
+  assert.equal(fetched, false);
+});
+
+test("d1 execute rejects an invalid --params before calling control", async () => {
+  let fetched = false;
+  const run = (paramsJson) => runD1Command(
+    ["execute", "main", "--sql", "SELECT 1", "--mode", "all", "--params", paramsJson, "--control-url", "http://ctl.test"],
+    { env: { ADMIN_TOKEN: "tok", WDL_NS: "demo" }, stdout: () => {}, controlFetch: async () => { fetched = true; return response({}); } }
+  );
+  await assert.rejects(() => run(""), /--params must be a JSON array/);
+  await assert.rejects(() => run("{}"), /--params must be a JSON array/);
   assert.equal(fetched, false);
 });
 
