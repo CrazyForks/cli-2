@@ -5,7 +5,8 @@ import { execFileSync } from "node:child_process";
 import { LONG_CONTROL_TIMEOUT_MS } from "../lib/control-fetch.js";
 import { defineCommand } from "../lib/command.js";
 import { CliError, defineCliOption, formatHelp, isMain, optionHelp } from "../lib/common.js";
-import { escapeTerminalText, formatKnownWarning, shellSingleQuote, writeStatusLine } from "../lib/output.js";
+import { escapeTerminalText, formatKnownWarning, writeStatusLine } from "../lib/output.js";
+import { isLocalDevHost } from "../lib/credentials.js";
 import { packWranglerProject } from "../lib/wrangler-pack.js";
 
 export const DEPLOY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
@@ -161,10 +162,10 @@ async function runDeploy({ values, positionals, context }) {
   stdout("");
   writeStatusLine(stdout, `✓ ${ns}/${workerName}@${version} live`);
   const controlHost = new URL(controlUrl).hostname;
-  const isLocal = controlHost === "localhost" || controlHost === "127.0.0.1";
+  const isLocal = isLocalDevHost(controlHost);
   if (isLocal) {
     const host = `${ns}.${platformDomain || "workers.local"}`;
-    writeStatusLine(stdout, `  curl -H ${shellSingleQuote(`Host: ${host}`)} http://localhost:8080/${workerName}/`);
+    writeStatusLine(stdout, `  http://${host}:8080/${workerName}/`);
   } else if (platformDomain) {
     writeStatusLine(stdout, `  https://${ns}.${platformDomain}/${workerName}/`);
   }

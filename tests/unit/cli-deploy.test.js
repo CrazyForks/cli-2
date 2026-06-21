@@ -1680,19 +1680,12 @@ test("runDeployCommand rejects non-object vars before bundling", async () => {
   }
 });
 
-test("runDeployCommand shell-quotes and terminal-escapes local curl hint host", async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), "wdl-run-deploy-curl-"));
+test("runDeployCommand prints a direct http URL for a local deploy", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wdl-run-deploy-localurl-"));
   try {
     mkdirSync(path.join(dir, "src"), { recursive: true });
     writeFileSync(path.join(dir, "src", "index.js"), 'export default { fetch() { return new Response("ok"); } };');
-    writeFileSync(
-      path.join(dir, "wrangler.toml"),
-      [
-        'name = "api"',
-        'main = "src/index.js"',
-        'compatibility_date = "2026-05-31"',
-      ].join("\n")
-    );
+    writeFileSync(path.join(dir, "wrangler.toml"), ['name = "api"', 'main = "src/index.js"', 'compatibility_date = "2026-05-31"'].join("\n"));
 
     const lines = [];
     let fetchCount = 0;
@@ -1712,17 +1705,13 @@ test("runDeployCommand shell-quotes and terminal-escapes local curl hint host", 
           fetchCount += 1;
           return fetchCount === 1
             ? response({ version: "v1", warnings: [] })
-            : response({ platformDomain: "workers.example'; echo pwn #\u001b]0;x\u0007" });
+            : response({ platformDomain: "workers.local" });
         },
       }
     );
 
-    const curlLine = lines.find((line) => line.startsWith("  curl -H 'Host: "));
-    assert.ok(curlLine, "expected curl hint line to be emitted");
-    assert.ok(curlLine.includes("  curl -H 'Host: demo.workers.example"), "expected host prefix in curl hint");
-    assert.ok(curlLine.includes("'\\''; echo pwn #"), "expected shell-escaped single quote in host");
-    assert.ok(curlLine.includes("\\u001b]0;x\\u0007"), "expected terminal control chars to be unicode-escaped");
-    assert.ok(curlLine.endsWith("' http://localhost:8080/api/"), "expected curl hint URL suffix");
+    assert.ok(lines.includes("  http://demo.workers.local:8080/api/"), "local deploy prints a direct http URL with the gateway port");
+    assert.equal(lines.some((line) => line.includes("curl -H")), false, "no curl hint");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1763,6 +1752,46 @@ test("runDeployCommand detects local control by hostname only", async () => {
 
     assert.ok(lines.includes("  https://demo.workers.example/api/"));
     assert.equal(lines.some((line) => line.includes("curl -H")), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runDeployCommand treats a .test control host as local (http URL, not https)", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wdl-run-deploy-test-host-"));
+  try {
+    mkdirSync(path.join(dir, "src"), { recursive: true });
+    writeFileSync(path.join(dir, "src", "index.js"), 'export default { fetch() { return new Response("ok"); } };');
+    writeFileSync(path.join(dir, "wrangler.toml"), ['name = "api"', 'main = "src/index.js"'].join("\n"));
+
+    const lines = [];
+    let fetchCount = 0;
+    await runDeployCommand(
+      [dir, "--ns", "demo", "--control-url", "http://admin.test"],
+      {
+        env: { ADMIN_TOKEN: "tok" },
+        stdout: (line) => lines.push(line),
+        stderr: () => {},
+        execFile: (_cmd, args) => {
+          if (args.includes("--version")) return "wrangler 4.94.0";
+          const outDir = args.find((arg) => arg.startsWith("--outdir=")).slice("--outdir=".length);
+          mkdirSync(outDir, { recursive: true });
+          writeFileSync(path.join(outDir, "index.js"), 'export default { fetch() { return new Response("ok"); } };');
+        },
+        controlFetch: async () => {
+          fetchCount += 1;
+          return fetchCount === 1
+            ? response({ version: "v1", warnings: [] })
+            : response({ platformDomain: "workers.local" });
+        },
+      }
+    );
+
+    assert.ok(
+      lines.includes("  http://demo.workers.local:8080/api/"),
+      "a .test control host prints the local http URL"
+    );
+    assert.equal(lines.some((line) => line.startsWith("  https://")), false, "no production https URL for a local deploy");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
