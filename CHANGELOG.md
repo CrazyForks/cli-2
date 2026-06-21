@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.1
+
+### Changed
+
+- `wdl d1 execute --mode exec` rejects `--params` locally before the control
+  plane round-trip (any value, including `[]` and an empty string); an invalid
+  non-exec `--params` now fails the JSON-array check instead of being silently
+  dropped.
+- A local deploy prints a direct `http://<ns>.<domain>:8080/<worker>/` URL
+  instead of a `curl -H 'Host: ...'` hint, and a control plane reached via a
+  `.test` / `.local` host is recognized as local (previously only
+  localhost / 127.0.0.1).
+- KV docs (GUIDE and `docs/kv.md`) describe the 512-byte key / list-prefix cap
+  the platform now enforces; they previously said it was not checked. Documented
+  that `wdl d1 execute --mode exec` takes no `--params`.
+
 ## 1.2.0
 
 ### Added
