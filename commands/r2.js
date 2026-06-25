@@ -160,11 +160,14 @@ function encodeR2KeyPath(key) {
 }
 
 function objectHeadFromHeaders({ namespace, bucket, key, headers }) {
-  const customMetadata = {};
+  // null-prototype: a control-supplied `x-amz-meta-__proto__` header becomes a real
+  // own key instead of being swallowed by Object.prototype's __proto__ setter.
+  const customMetadata = Object.create(null);
   for (const [name, value] of headerEntries(headers)) {
     const lower = String(name).toLowerCase();
     if (lower.startsWith("x-amz-meta-")) {
-      customMetadata[lower.slice("x-amz-meta-".length)] = String(value);
+      const metaKey = lower.slice("x-amz-meta-".length);
+      if (metaKey) customMetadata[metaKey] = String(value);
     }
   }
   return {

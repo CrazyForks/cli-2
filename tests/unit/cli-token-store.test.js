@@ -4,6 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  assertStoreDirSecure,
   readTokenStore,
   tokenStoreDir,
   tokenStorePath,
@@ -156,7 +157,7 @@ test("writeTokenStore writes canonical sorted output with a managed-by header", 
   });
 });
 
-test("writeTokenStore sets 0600 file permissions", () => {
+test("writeTokenStore sets 0600 file and 0700 dir permissions", () => {
   if (process.platform === "win32") return;
   withTempHome((dir) => {
     const p = path.join(dir, "credentials");
@@ -171,7 +172,38 @@ test("writeTokenStore sets 0600 file permissions", () => {
     chmodSync(p, 0o644);
     writeTokenStore(p, { namespaces: { acme: { ADMIN_TOKEN: "t3" } } });
     assert.equal(statSync(p).mode & 0o777, 0o600);
+    // The dir is 0700, and a pre-existing 0755 dir is tightened too.
+    const storeDir = path.dirname(p);
+    assert.equal(statSync(storeDir).mode & 0o777, 0o700);
+    chmodSync(storeDir, 0o755);
+    writeTokenStore(p, { namespaces: { acme: { ADMIN_TOKEN: "t4" } } });
+    assert.equal(statSync(storeDir).mode & 0o777, 0o700);
+    // A freshly created store dir (the mkdir branch, not just the tighten branch).
+    const fresh = path.join(dir, "fresh", "credentials");
+    writeTokenStore(fresh, { namespaces: { acme: { ADMIN_TOKEN: "t" } } });
+    assert.equal(statSync(path.dirname(fresh)).mode & 0o777, 0o700);
   });
+});
+
+test("assertStoreDirSecure refuses a group/world-writable store dir", () => {
+  if (process.platform === "win32") return;
+  const made = [];
+  const mkdir = (mode) => {
+    const d = mkdtempSync(path.join(tmpdir(), "wdl-store-secure-"));
+    chmodSync(d, mode);
+    made.push(d);
+    return d;
+  };
+  try {
+    assert.doesNotThrow(() => assertStoreDirSecure(mkdir(0o700)));
+    assert.doesNotThrow(() => assertStoreDirSecure(mkdir(0o755))); // read/exec, not writable
+    assert.throws(() => assertStoreDirSecure(mkdir(0o770)), /group\/world-writable/);
+    assert.throws(() => assertStoreDirSecure(mkdir(0o777)), /group\/world-writable/);
+    // The win32 branch never inspects POSIX mode bits.
+    assert.doesNotThrow(() => assertStoreDirSecure(mkdir(0o777), "win32"));
+  } finally {
+    for (const d of made) rmSync(d, { recursive: true, force: true });
+  }
 });
 
 test("readTokenStore rejects a key outside any section", () => {

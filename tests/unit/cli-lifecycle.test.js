@@ -765,6 +765,7 @@ test("r2 buckets and objects commands call encoded control endpoints", async () 
             etag: '"abc"',
             "last-modified": "Wed, 22 Apr 2026 00:00:00 GMT",
             "x-amz-meta-source": "unit",
+            "x-amz-meta-__proto__": "pwned",
           },
           text: async () => "",
         };
@@ -818,7 +819,34 @@ test("r2 buckets and objects commands call encoded control endpoints", async () 
   ]);
   assert.ok(lines.includes("R2 object demo space/uploads/dir/file.txt:"));
   assert.ok(lines.includes("  customMetadata.source: unit"));
+  assert.ok(lines.includes("  customMetadata.__proto__: pwned"), "a control-supplied __proto__ metadata key is not dropped");
   assert.equal(lines.at(-1), "OK demo space/uploads/dir/file.txt deleted");
+});
+
+test("r2 object head --json keeps a __proto__ metadata key and drops a bare x-amz-meta-", async () => {
+  const lines = [];
+  const deps = {
+    env: { ADMIN_TOKEN: "tok", WDL_NS: "demo" },
+    stdout: (line) => lines.push(line),
+    controlFetch: async () => ({
+      status: 200,
+      ok: true,
+      headers: {
+        "content-length": "0",
+        "x-amz-meta-source": "unit",
+        "x-amz-meta-__proto__": "pwned",
+        "x-amz-meta-": "dropped",
+      },
+      text: async () => "",
+    }),
+  };
+  await runR2Command(["objects", "head", "--ns", "demo", "uploads", "k", "--json", "--control-url", "http://ctl.test"], deps);
+  const meta = JSON.parse(lines.find((l) => l.trim().startsWith("{"))).customMetadata;
+  // JSON.parse re-materializes __proto__ as an own data property, so read the
+  // descriptor — `meta.__proto__` would go through the prototype accessor instead.
+  assert.equal(Object.getOwnPropertyDescriptor(meta, "__proto__")?.value, "pwned");
+  assert.equal(meta.source, "unit");
+  assert.ok(!Object.hasOwn(meta, ""), "a bare x-amz-meta- header produces no empty metadata key");
 });
 
 test("r2 buckets list accepts flags before the group/action", async () => {
