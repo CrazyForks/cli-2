@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.2
+
+### Security
+
+- `wdl token set` and any other credential write now refuse a group- or
+  world-writable store directory: a 0600 file there can still be deleted,
+  replaced, or symlink-swapped by another user, so the write fails with a
+  `chmod 700` hint instead. POSIX only.
+- `wdl r2 object head --json` parses custom metadata without prototype
+  pollution — an `x-amz-meta-__proto__` header stays an own key, and an empty
+  `x-amz-meta-` header is dropped.
+
+### Changed
+
+- Docs and the npm description point at the now-public platform repo
+  ([wdl-dev/wdl](https://github.com/wdl-dev/wdl)), frame the CLI as its
+  companion, and add a self-host note.
+
 ## 1.2.1
 
 ### Changed
