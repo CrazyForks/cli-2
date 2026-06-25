@@ -6,12 +6,12 @@
 
 English | [中文](https://github.com/wdl-dev/cli/blob/main/README-zh.md)
 
-`wdl` deploys Cloudflare Workers-style applications to a **WDL platform** — a
-self-hostable runtime and control plane that runs Workers-shaped code outside
-Cloudflare. It is the tenant-side CLI: it bundles your project with Wrangler v4,
-uploads it to your operator's control plane, and manages everything around it —
-D1, R2, KV, Queues, Durable Objects, Workflows, secrets, and live logs — inside
-your own namespace.
+`wdl` is the companion CLI for a
+[**WDL platform**](https://github.com/wdl-dev/wdl) — a self-hostable runtime and
+control plane that runs Cloudflare Workers-style code outside Cloudflare. It
+bundles your project with Wrangler v4, uploads it to your operator's control
+plane, and manages everything around it — D1, R2, KV, Queues, Durable Objects,
+Workflows, secrets, and live logs — inside your own namespace.
 
 ## How it relates to Cloudflare Workers
 
@@ -36,12 +36,13 @@ your own namespace.
 
 ## The hosted platform (preview)
 
-WDL is open infrastructure first: operators run their own platform and tenants
-deploy to it with this CLI. The WDL Team will also operate an experimental
-hosted platform — the control plane at `api.wdl.dev`, workers serving from
-`*.wdl.sh` — where everything on wdl.dev itself ships as workers, so platform
-iteration happens in the open. It is not live yet; if you want to be a seed
-user, email <hi@wdl.dev>.
+WDL is open infrastructure first: operators run their own platform
+([wdl-dev/wdl](https://github.com/wdl-dev/wdl), open source) and tenants deploy
+to it with this CLI. The WDL Team also runs an experimental hosted platform —
+the control plane at `api.wdl.dev`, workers serving from `*.wdl.sh` — where
+wdl.dev itself already runs as workers, so platform iteration happens in the
+open. It is still a preview and not open for general signups; if you want to be
+a seed user, email <hi@wdl.dev>.
 
 ## Features
 

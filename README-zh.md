@@ -4,7 +4,7 @@
 
 [English](https://github.com/wdl-dev/cli/blob/main/README.md) | 中文
 
-`wdl` 把 Cloudflare Workers 风格的应用部署到 **WDL 平台**——一套可自托管的运行时 + 控制面，让 Workers 形态的代码在 Cloudflare 之外运行。它是租户侧 CLI：用 Wrangler v4 在本地打包项目、上传到运维方的控制面，并在你自己的命名空间里管理周边的一切——D1、R2、KV、Queues、Durable Objects、Workflows、secrets 和实时日志。
+`wdl` 是 [**WDL 平台**](https://github.com/wdl-dev/wdl)（一套可自托管的运行时 + 控制面，让 Cloudflare Workers 风格的代码在 Cloudflare 之外运行）的配套 CLI：用 Wrangler v4 在本地打包项目、上传到运维方的控制面，并在你自己的命名空间里管理周边的一切——D1、R2、KV、Queues、Durable Objects、Workflows、secrets 和实时日志。
 
 ## 与 Cloudflare Workers 的关系
 
@@ -22,7 +22,7 @@
 
 ## 托管平台（预告）
 
-WDL 首先是开源基础设施：运维方自建平台，租户用本 CLI 部署。WDL Team 之后也会运营一个实验性的托管平台——控制面在 `api.wdl.dev`，worker 通过 `*.wdl.sh` 提供服务——wdl.dev 自身的全部功能都会以 worker 形式跑在这个平台上，平台迭代公开可见。目前尚未上线；想成为种子用户，欢迎发邮件到 <hi@wdl.dev> 联系我们。
+WDL 首先是开源基础设施：运维方自建平台（[wdl-dev/wdl](https://github.com/wdl-dev/wdl)，开源），租户用本 CLI 部署。WDL Team 也在运营一个实验性的托管平台——控制面在 `api.wdl.dev`，worker 通过 `*.wdl.sh` 提供服务——wdl.dev 自身已经以 worker 形式跑在这个平台上，平台迭代公开可见。目前仍是预览、尚未开放注册；想成为种子用户，欢迎发邮件到 <hi@wdl.dev> 联系我们。
 
 ## 功能
 

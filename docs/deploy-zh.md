@@ -24,7 +24,7 @@ CLI 需要三个值：
 | --- | --- |
 | `ADMIN_TOKEN` | 租户部署 token。**敏感** —— 不要粘到聊天/提交记录里。 |
 | `WDL_NS` | 租户命名空间，例如 `acme`、`demo-prod`。 |
-| `CONTROL_URL` | 控制面地址，由运维方提供（例如 `https://api.wdl.dev`）。CLI 没有内置默认值，必须配置。 |
+| `CONTROL_URL` | 控制面地址——由运维方提供，或你自托管的平台（例如 `https://api.wdl.dev`）。CLI 没有内置默认值，必须配置。 |
 
 **推荐路径：** `wdl token set --ns <ns> --control-url <url>` 在隐藏提示里读取 token、调 `/whoami` 校验后以 `0600` 存入 `~/.config/wdl/credentials` —— 它不会落在任何项目文件或 shell 历史里。第一个存入的 namespace 成为默认，之后 `wdl deploy` 不用再带 `--ns`。一份存储服务这台机器上所有项目；详见 [token-zh.md](./token-zh.md)。
 

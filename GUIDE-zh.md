@@ -10,8 +10,10 @@
 
 - Namespace：你的租户命名空间，例如 `acme`。
 - Tenant token：只能操作你自己 namespace 的部署令牌。
-- Control URL：部署入口，由运维方提供。CLI 没有内置默认值，未配置时命令会直接报配置错误。（WDL Team 的托管预览上线后会使用 `https://api.wdl.dev`。）
+- Control URL：部署入口，由运维方提供。CLI 没有内置默认值，未配置时命令会直接报配置错误。（WDL Team 的托管预览在 `https://api.wdl.dev`。）
 - Platform domain：Worker 对外服务的运行时域名，例如 `wdl.sh`。
+
+没有运维方？平台已开源——自己跑 [wdl-dev/wdl](https://github.com/wdl-dev/wdl)，把 `CONTROL_URL` 指向你自己的控制面即可；namespace、token、platform domain 都由你自己设定。
 
 默认 Worker 访问地址形态是：
 

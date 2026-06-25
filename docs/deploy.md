@@ -33,7 +33,7 @@ The CLI needs three values:
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `ADMIN_TOKEN` | Tenant deploy token. **Sensitive** — never paste it into chat or commit history.                                                   |
 | `WDL_NS`      | Tenant namespace, e.g. `acme`, `demo-prod`.                                                                                        |
-| `CONTROL_URL` | Control-plane URL, provided by your operator (e.g. `https://api.wdl.dev`). The CLI has no built-in default; it must be configured. |
+| `CONTROL_URL` | Control-plane URL — from your operator, or your own self-hosted platform (e.g. `https://api.wdl.dev`). The CLI has no built-in default; it must be configured. |
 
 **Recommended path:** `wdl token set --ns <ns> --control-url <url>` reads the
 token at a hidden prompt, validates it against `/whoami`, and stores it `0600` in

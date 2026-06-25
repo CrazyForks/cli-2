@@ -2,15 +2,17 @@
 
 ## Project Structure & Module Organization
 
-This repository is the tenant CLI for the WDL platform. The executable is
-`bin/wdl.js`; command implementations live in `commands/`, with shared helpers
-in `lib/`. Unit tests are in `tests/unit/`. User-facing capability docs live in
-`docs/`, while `templates/AGENTS.md` and `.claude/skills/wdl-deploy/SKILL.md`
-distill those docs for generated projects and AI agents. Example tenant projects
-live under `examples/` and pin `wrangler@^4`; the deploy bundling step expects
-v4, so keep new examples and any docs that recommend a wrangler version on v4.
-New Wrangler configs should start with `compatibility_date = "2026-05-31"`
-unless the WDL runtime moves again.
+This repository is the companion CLI for the WDL platform
+([wdl-dev/wdl](https://github.com/wdl-dev/wdl)): the tenant-side tool that
+bundles a project, uploads it to a WDL control plane, and manages it. The
+executable is `bin/wdl.js`; command implementations live in `commands/`, with
+shared helpers in `lib/`. Unit tests are in `tests/unit/`. User-facing
+capability docs live in `docs/`, while `templates/AGENTS.md` and
+`.claude/skills/wdl-deploy/SKILL.md` distill those docs for generated projects
+and AI agents. Example tenant projects live under `examples/` and pin
+`wrangler@^4`; the deploy bundling step expects v4, so keep new examples and any
+docs that recommend a wrangler version on v4. New Wrangler configs should start
+with `compatibility_date = "2026-05-31"` unless the WDL runtime moves again.
 
 ## Build, Test, and Development Commands
 

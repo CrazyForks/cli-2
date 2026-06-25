@@ -14,9 +14,12 @@ Your operator will provide:
 - Tenant token: a deploy token scoped to your namespace.
 - Control URL: the deployment endpoint your operator gives you. The CLI has no
   built-in default; commands fail with a configuration error until it is set.
-  (The WDL Team's hosted preview will use `https://api.wdl.dev` once it is
-  live.)
+  (The WDL Team's hosted preview is at `https://api.wdl.dev`.)
 - Platform domain: the runtime domain Workers serve from, e.g. `wdl.sh`.
+
+No operator? The platform is open source — run
+[wdl-dev/wdl](https://github.com/wdl-dev/wdl) yourself and point `CONTROL_URL`
+at your own control plane; you set the namespace, token, and platform domain.
 
 The default Worker URL shape is:
 
