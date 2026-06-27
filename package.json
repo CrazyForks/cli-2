@@ -54,6 +54,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/unit/cli-*.test.js",
+    "test:integration:live": "node --test tests/integration/cli-live.test.js",
     "prepublishOnly": "npm run lint && npm run typecheck && npm test"
   },
   "publishConfig": {
