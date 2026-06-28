@@ -11,7 +11,7 @@ import {
   writeTokenStore,
 } from "../../lib/token-store.js";
 
-function withTempHome(fn) {
+function withTempDir(fn) {
   const dir = mkdtempSync(path.join(tmpdir(), "wdl-token-store-"));
   try {
     return fn(dir);
@@ -35,14 +35,21 @@ test("tokenStoreDir honors XDG_CONFIG_HOME, then falls back to ~/.config", () =>
   );
 });
 
+test("tokenStoreDir on win32 honors APPDATA", () => {
+  assert.equal(
+    tokenStoreDir({ APPDATA: "C:\\Users\\u\\AppData\\Roaming" }, () => "C:\\Users\\u", "win32"),
+    path.join("C:\\Users\\u\\AppData\\Roaming", "wdl")
+  );
+});
+
 test("readTokenStore returns an empty store when the file is absent", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     assert.deepEqual(readTokenStore(path.join(dir, "credentials")), { defaultNs: null, namespaces: {} });
   });
 });
 
 test("writeTokenStore then readTokenStore round-trips namespaces and fields", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "wdl", "credentials");
     const store = {
       defaultNs: null,
@@ -57,7 +64,7 @@ test("writeTokenStore then readTokenStore round-trips namespaces and fields", ()
 });
 
 test("writeTokenStore then readTokenStore round-trips the default namespace", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     const store = {
       defaultNs: "acme",
@@ -73,7 +80,7 @@ test("writeTokenStore then readTokenStore round-trips the default namespace", ()
 });
 
 test("writeTokenStore drops a default that has no stored entry", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     writeTokenStore(p, { defaultNs: "ghost", namespaces: { acme: { ADMIN_TOKEN: "t" } } });
     assert.doesNotMatch(readFileSync(p, "utf8"), /WDL_NS=/);
@@ -82,7 +89,7 @@ test("writeTokenStore drops a default that has no stored entry", () => {
 });
 
 test("writeTokenStore quotes and escapes so odd token characters round-trip", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     const store = {
       defaultNs: null,
@@ -96,7 +103,7 @@ test("writeTokenStore quotes and escapes so odd token characters round-trip", ()
 });
 
 test("round-trips a token containing literal backslash escape sequences", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     // The token literally contains `\n`, `\t`, `\\`, `\"` as backslash+char,
     // plus a Windows-style path — none of which must be decoded as control chars.
@@ -112,7 +119,7 @@ test("round-trips a token containing literal backslash escape sequences", () => 
 });
 
 test("preserves a namespace named like an Object.prototype key", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     const store = {
       defaultNs: "constructor",
@@ -130,7 +137,7 @@ test("preserves a namespace named like an Object.prototype key", () => {
 });
 
 test("handles a __proto__ section without polluting the prototype", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     writeFileSync(p, '[__proto__]\nADMIN_TOKEN="x"\n[acme]\nADMIN_TOKEN="a"\n');
     const back = readTokenStore(p);
@@ -142,7 +149,7 @@ test("handles a __proto__ section without polluting the prototype", () => {
 });
 
 test("writeTokenStore writes canonical sorted output with a managed-by header", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     writeTokenStore(p, {
       namespaces: {
@@ -159,7 +166,7 @@ test("writeTokenStore writes canonical sorted output with a managed-by header", 
 
 test("writeTokenStore sets 0600 file and 0700 dir permissions", () => {
   if (process.platform === "win32") return;
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     writeTokenStore(p, { namespaces: { acme: { ADMIN_TOKEN: "t" } } });
     assert.equal(statSync(p).mode & 0o777, 0o600);
@@ -207,7 +214,7 @@ test("assertStoreDirSecure refuses a group/world-writable store dir", () => {
 });
 
 test("readTokenStore rejects a key outside any section", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     writeFileSync(p, "ADMIN_TOKEN=loose\n");
     assert.throws(() => readTokenStore(p), /outside a \[namespace\] section/);
@@ -215,7 +222,7 @@ test("readTokenStore rejects a key outside any section", () => {
 });
 
 test("readTokenStore reads a base WDL_NS as the default namespace", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     writeFileSync(p, 'WDL_NS="acme"\n[acme]\nADMIN_TOKEN="t"\n');
     assert.deepEqual(readTokenStore(p), { defaultNs: "acme", namespaces: { acme: { ADMIN_TOKEN: "t" } } });
@@ -223,7 +230,7 @@ test("readTokenStore reads a base WDL_NS as the default namespace", () => {
 });
 
 test("readTokenStore ignores unknown keys and comments", () => {
-  withTempHome((dir) => {
+  withTempDir((dir) => {
     const p = path.join(dir, "credentials");
     writeFileSync(p, "# note\n[acme]\nADMIN_TOKEN=\"t\"\nUNKNOWN=x\n");
     assert.deepEqual(readTokenStore(p), { defaultNs: null, namespaces: { acme: { ADMIN_TOKEN: "t" } } });

@@ -90,6 +90,91 @@ test("d1 execute sends SQL mode and JSON params", async () => {
   assert.deepEqual(lines, ['{\n  "results": [\n    {\n      "n": 1\n    }\n  ]\n}']);
 });
 
+test("d1 execute rejects empty SQL before calling control", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wdl-d1-empty-sql-"));
+  try {
+    const file = path.join(dir, "empty.sql");
+    writeFileSync(file, "");
+
+    for (const args of [
+      ["execute", "main", "--sql", "", "--control-url", "http://ctl.test"],
+      ["execute", "main", "--file", "empty.sql", "--control-url", "http://ctl.test"],
+    ]) {
+      await assert.rejects(
+        () => runD1Command(args, {
+          cwd: dir,
+          env: { ADMIN_TOKEN: "tok", WDL_NS: "demo" },
+          stdout: () => {},
+          controlFetch: async () => {
+            throw new Error("controlFetch should not be called");
+          },
+        }),
+        /must contain non-empty SQL/
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("d1 execute rejects empty --file and conflicting SQL sources before calling control", async () => {
+  for (const { args, message } of [
+    {
+      args: ["execute", "main", "--file", "", "--control-url", "http://ctl.test"],
+      message: /--file requires a path/,
+    },
+    {
+      args: ["execute", "main", "--sql", "", "--file", "query.sql", "--control-url", "http://ctl.test"],
+      message: /pass only one of --sql or --file/,
+    },
+  ]) {
+    await assert.rejects(
+      () => runD1Command(args, {
+        env: { ADMIN_TOKEN: "tok", WDL_NS: "demo" },
+        stdout: () => {},
+        controlFetch: async () => {
+          throw new Error("controlFetch should not be called");
+        },
+      }),
+      message
+    );
+  }
+});
+
+test("d1 execute --file accepts a path inside the project", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wdl-d1-file-inside-"));
+  try {
+    writeFileSync(path.join(dir, "inside.sql"), "SELECT 1;");
+    const calls = [];
+
+    await runD1Command([
+      "execute",
+      "main",
+      "--file",
+      "inside.sql",
+      "--control-url",
+      "http://ctl.test",
+    ], {
+      cwd: dir,
+      env: { ADMIN_TOKEN: "tok", WDL_NS: "demo" },
+      stdout: () => {},
+      controlFetch: async (url, init = {}) => {
+        calls.push({ url, init });
+        return response({ result: { results: [] } });
+      },
+    });
+
+    assert.equal(calls[0].url, "http://ctl.test/ns/demo/d1/databases/main/query");
+    assert.equal(calls[0].init.method, "POST");
+    assert.deepEqual(JSON.parse(calls[0].init.body), {
+      sql: "SELECT 1;",
+      mode: "all",
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("d1 migrations apply reads sorted SQL files from --dir", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "wdl-d1-migrations-"));
   try {
@@ -293,6 +378,32 @@ test("d1 execute rejects an unknown --mode before calling control", async () => 
     /--mode must be one of/
   );
   assert.equal(fetched, false);
+});
+
+test("d1 execute accepts all valid --mode values", async () => {
+  for (const mode of ["all", "raw", "run", "exec"]) {
+    const calls = [];
+    await runD1Command([
+      "execute",
+      "main",
+      "--sql",
+      "SELECT 1",
+      "--mode",
+      mode,
+      "--control-url",
+      "http://ctl.test",
+    ], {
+      env: { ADMIN_TOKEN: "tok", WDL_NS: "demo" },
+      stdout: () => {},
+      controlFetch: async (url, init = {}) => {
+        calls.push({ url, init });
+        return response({ result: { results: [] } });
+      },
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(JSON.parse(calls[0].init.body).mode, mode);
+  }
 });
 
 test("d1 execute rejects --mode exec with any --params before calling control", async () => {

@@ -379,6 +379,8 @@ wdl d1 migrations apply main
 wdl d1 delete main
 ```
 
+`wdl d1 execute` 要求 `--sql` 或 `--file` 提供非空 SQL。
+
 `wdl d1 delete` 默认会要求确认。自动化脚本里只有在已有独立安全检查后，才建议传 `--yes`。
 
 D1 运行时请求在执行前有边界：binary query body 最大 8 MiB；解码后的请求最多 1000 条 SQL 语句，SQL 加 params 聚合最大 8 MiB；结果 body 受平台默认 16 MiB 聚合上限保护。多语句 `exec()` 会在同一个 SQLite transaction 中执行；如果后面的语句失败，这次 `exec()` 里之前已经执行的语句会回滚。
