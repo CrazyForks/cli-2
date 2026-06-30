@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1
+
+### Fixed
+
+- Assets docs now show `await env.ASSETS.url(...)`, matching the runtime API and
+  the example workers.
+
 ## 1.3.0
 
 ### Changed
