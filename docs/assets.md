@@ -3,7 +3,7 @@
 ## What it is
 
 Files under the configured directory (usually `./public`) are uploaded to S3 at
-deploy time and served by the CDN. The Worker gets the CDN URL via
+deploy time and served by the CDN. The Worker gets the CDN URL by awaiting
 `env.ASSETS.url(path)`.
 
 The config field follows Cloudflare Workers Assets' `assets.directory` shape,
@@ -61,7 +61,7 @@ default.
 export default {
   async fetch(request, env, ctx) {
     // Get the CDN URL for a file
-    const cssUrl = env.ASSETS.url("/styles.css");
+    const cssUrl = await env.ASSETS.url("/styles.css");
     // → "https://cdn.<...>/styles.css" (or similar — the host is decided by the platform)
 
     return Response.json({ cssUrl });
@@ -69,13 +69,13 @@ export default {
 };
 ```
 
-`env.ASSETS.url(path)` is the common usage — embed the URL into HTML or JSON
-responses and let browsers go straight to the CDN.
+`await env.ASSETS.url(path)` is the common usage — embed the URL into HTML or
+JSON responses and let browsers go straight to the CDN.
 
 ## URL placeholders in HTML pages
 
 If the HTML page you serve references CSS / JS bundles, build the asset URLs
-with `env.ASSETS.url(...)` when the Worker returns the HTML. See
+with `await env.ASSETS.url(...)` when the Worker returns the HTML. See
 `../examples/pages-assets` and `../examples/inspection-demo` for working
 patterns.
 
@@ -105,7 +105,8 @@ frontend build commands automatically.
   are immutable per deploy and bounded by the 32 MiB deploy manifest cap. Use R2
   — see [r2.md](./r2.md).
 - ❌ Adding `assets.run_worker_first`. It is silently ignored.
-- ❌ Hardcoding the CDN host in source. Always go through `env.ASSETS.url(...)`.
+- ❌ Hardcoding the CDN host in source. Always go through
+  `await env.ASSETS.url(...)`.
 - ❌ Committing build output to git. Generate it at deploy time.
 
 ## End-to-end examples

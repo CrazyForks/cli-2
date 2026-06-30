@@ -2,7 +2,7 @@
 
 ## 是什么
 
-配置目录（通常是 `./public`）下的文件在部署时被上传到 S3，由 CDN 对外提供访问。Worker 通过 `env.ASSETS.url(path)` 拿到 CDN URL。
+配置目录（通常是 `./public`）下的文件在部署时被上传到 S3，由 CDN 对外提供访问。Worker 通过 `await env.ASSETS.url(path)` 拿到 CDN URL。
 
 配置字段沿用 Cloudflare Workers Assets 的 `assets.directory` 形态，但运行时目前只实现 URL 生成，不实现 Workers Assets 的请求拦截或 `fetch()` 读取。
 
@@ -43,7 +43,7 @@ CLI 默认不会上传 assets 目录里的 `.git/`、`node_modules/`、`.DS_Stor
 export default {
   async fetch(request, env, ctx) {
     // 拿到某个文件的 CDN URL
-    const cssUrl = env.ASSETS.url("/styles.css");
+    const cssUrl = await env.ASSETS.url("/styles.css");
     // → "https://cdn.<...>/styles.css"（或类似 —— 主机由平台决定）
 
     return Response.json({ cssUrl });
@@ -51,11 +51,11 @@ export default {
 };
 ```
 
-`env.ASSETS.url(path)` 是常见用法 —— 把 URL 嵌进 HTML 或 JSON 响应，让浏览器直接走 CDN。
+`await env.ASSETS.url(path)` 是常见用法 —— 把 URL 嵌进 HTML 或 JSON 响应，让浏览器直接走 CDN。
 
 ## HTML 页面的 URL 占位符
 
-如果服务的 HTML 页面引用 CSS / JS bundle，在 Worker 返回 HTML 时用 `env.ASSETS.url(...)` 拼出资源 URL。可工作的模式见 `../examples/pages-assets` 和 `../examples/inspection-demo`。
+如果服务的 HTML 页面引用 CSS / JS bundle，在 Worker 返回 HTML 时用 `await env.ASSETS.url(...)` 拼出资源 URL。可工作的模式见 `../examples/pages-assets` 和 `../examples/inspection-demo`。
 
 ## 不要写 `assets.run_worker_first`
 
@@ -76,7 +76,7 @@ public/
 
 - ❌ 把运行时变化的文件或大体积文件集合放 assets。Assets 每次部署不可变，且受 deploy manifest 32 MiB 上限约束。用 R2 —— 见 [r2-zh.md](./r2-zh.md)。
 - ❌ 加 `assets.run_worker_first`。会被静默忽略。
-- ❌ 在源码里硬编码 CDN 主机。永远走 `env.ASSETS.url(...)`。
+- ❌ 在源码里硬编码 CDN 主机。永远走 `await env.ASSETS.url(...)`。
 - ❌ 把构建产物提交到 git。在部署时生成。
 
 ## 端到端示例
