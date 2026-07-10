@@ -1,6 +1,6 @@
 ---
 name: wdl-deploy
-description: Deploy and manage Cloudflare Workers-style projects on the WDL platform via the `wdl` CLI (init, deploy, config explain, whoami, doctor, tail, secret, workers, delete, d1, r2, workflows). Trigger when the user asks to scaffold or deploy a Worker, inspect resolved CLI configuration, identify the active control token/principal, run diagnostics, tail live logs, configure KV / Queues / Durable Objects / Workflows bindings, manage D1 / R2 / secrets through `wdl`, or troubleshoot wdl CLI output. Works with `wrangler.toml` / `wrangler.jsonc` projects pinned to wrangler@^4.
+description: Deploy and manage Cloudflare Workers-style projects on the WDL platform via the `wdl` CLI (init, deploy, config explain, whoami, doctor, tail, secret, workers, delete, d1, r2, workflows). Trigger when the user asks to scaffold or deploy a Worker, inspect resolved CLI configuration, identify the active control token/principal, run diagnostics, tail live logs, configure KV / Queues / Durable Objects / Workflows bindings, manage D1 / R2 / secrets through `wdl`, or troubleshoot wdl CLI output. Works with `wrangler.json` / `wrangler.jsonc` / `wrangler.toml` projects pinned to wrangler@^4.
 ---
 
 # WDL CLI deploy skill
@@ -44,10 +44,25 @@ Open the relevant doc before answering:
 Each doc has a Chinese twin at `docs/<name>-zh.md`; both languages are
 authoritative, and agent-facing references use the English set.
 
+New Wrangler configs should use `compatibility_date = "2026-06-17"` unless a
+project feature requires a newer target or the operator gives a different
+target. WDL follows Wrangler config priority (`wrangler.json`, then
+`wrangler.jsonc`, then `wrangler.toml`); both JSON filenames use Wrangler's
+JSONC syntax, including comments and trailing commas. The control plane is
+canonical for unsupported runtime shapes such as unsupported workerd
+experimental compatibility flags and WDL-reserved injected module names; the
+CLI still fails fast for cheap local cases such as Python Workers modules,
+unmapped top-level or selected-env Wrangler runtime/deploy keys (`[site]`,
+`workers_dev`, `pages_build_output_dir`, `observability`, `limits`,
+`placement`, etc.), and ambiguous runtime `env` name collisions between
+`[vars]`, explicit bindings, and the implicit `ASSETS` binding.
+
 Never recommend setting `CONTROL_CONNECT_HOST` outside local development: it
 overrides the TCP target the admin token connects to (Host header + TLS SNI
 still track `CONTROL_URL`), and a stale value in a CI or production shell could
-route the token to an unintended host. GUIDE covers the details.
+route the token to an unintended host. A URL-form override uses its scheme only
+to choose the default TCP port; transport still follows `CONTROL_URL`. GUIDE
+covers the details.
 
 `wdl deploy` runs the project's Wrangler dry-run and build hooks as the user, so
 they can read the on-disk token store (`~/.config/wdl/credentials`); only deploy

@@ -58,6 +58,9 @@ If you do not want to link the CLI globally, call the entrypoint directly:
 node /path/to/cli/bin/wdl.js deploy ./my-worker
 ```
 
+For command-specific help, run `wdl <command> --help` or
+`wdl help <command>`.
+
 ### Configure Defaults
 
 The recommended setup is the `wdl token` store (see below); credentials can also
@@ -122,7 +125,9 @@ the request connects to while the HTTP Host header and TLS SNI keep tracking
 `CONTROL_URL` (so over HTTPS the control plane's certificate still rejects a
 redirected connection; plain http has no such check). Use it only for local
 development — never set it persistently in a CI or production shell, where a
-stale value could route the admin token to an unintended target.
+stale value could route the admin token to an unintended target. When the
+override is a URL, its scheme only selects the default TCP port (`http` uses 80;
+`https` uses 443); request transport, Host, and SNI still follow `CONTROL_URL`.
 
 The recommended setup keeps these credentials in a managed store rather than a
 shell export or a project `.env`: `wdl token set --ns <ns> --control-url <url>`
@@ -148,10 +153,11 @@ token, and where each value came from. Use `wdl whoami` to call control-plane
 `/whoami` and display the authenticated principal, token id, platform version,
 minimum supported CLI version, and URL hints. Use `wdl doctor` for local
 readiness checks covering Node.js, wdl-cli, Wrangler, config presence, resolved
-credentials, and `/whoami` reachability. `doctor` can detect token validity,
-principal namespace, platform version, and CLI compatibility when the control
-plane exposes `/whoami`; deeper capability checks still require additional
-control endpoints.
+credentials, and `/whoami` reachability. Add `--strict` when using it as a CI
+gate; the command still prints the checks, then exits non-zero if any check
+fails. `doctor` can detect token validity, principal namespace, platform
+version, and CLI compatibility when the control plane exposes `/whoami`; deeper
+capability checks still require additional control endpoints.
 
 ## Scaffolding a New Worker
 
@@ -207,14 +213,14 @@ Minimal `wrangler.toml`:
 ```toml
 name = "hello"
 main = "src/index.js"
-compatibility_date = "2026-05-31"
+compatibility_date = "2026-06-17"
 
 [vars]
 APP_NAME = "hello"
 ```
 
-For new projects, use `compatibility_date = "2026-05-31"` unless your operator
-has given you a different target.
+For new projects, use `compatibility_date = "2026-06-17"` unless a required
+feature or your operator gives you a newer target.
 
 You can keep using `wrangler dev` for local development. To deploy to this
 platform, use `wdl deploy` instead. The deploy command runs
@@ -222,6 +228,11 @@ platform, use `wdl deploy` instead. The deploy command runs
 `WDL_WRANGLER_BIN`, the Worker project's local wrangler, the CLI package's local
 wrangler, then `PATH`. TypeScript, module resolution, esbuild bundling, and
 related build behavior still follow Wrangler.
+
+When several Wrangler config files exist, WDL follows Wrangler's priority:
+`wrangler.json`, then `wrangler.jsonc`, then `wrangler.toml`.
+Both JSON filenames use Wrangler's JSONC syntax, including comments and
+trailing commas.
 
 After configuring the CLI defaults:
 
@@ -289,6 +300,12 @@ Oversized console or exception events are dropped whole and reported as small
 warning events instead of being truncated. Use the normal log platform your
 operator provides for incident reconstruction and full payloads.
 
+Control may close long-running tail sessions when the client stops reading
+(`session_idle`, about 15s) or when the session reaches its maximum lifetime
+(`session_expired`, operator default 15 minutes). The CLI prints the warning and
+reconnects automatically; frequent repeats usually mean the terminal or wrapper
+process is not consuming output fast enough.
+
 ## URLs and Routes
 
 | Purpose                | URL                                                    | Use                                                                     |
@@ -316,6 +333,15 @@ for you.
 
 ## Supported Wrangler Configuration
 
+The control plane is the canonical validator for shapes that Wrangler can
+bundle but WDL cannot run, including unsupported workerd experimental
+compatibility flags and WDL-reserved injected module names. The CLI still
+fails fast for cheap local cases such as Python Worker modules and ambiguous
+runtime `env` name collisions between `[vars]`, explicit bindings, and the
+implicit `ASSETS` binding. Deploy and secret mutation also enforce the
+headroomed 1 MiB workerd `workerLoader` env budget; large `[vars]`, secrets,
+binding metadata, or retained versions can fail with `worker_env_too_large`.
+
 | Configuration                                                                                                                                                                                                                                                                                                                                    | Support                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name` / `main` / `compatibility_date` / `compatibility_flags`                                                                                                                                                                                                                                                                                   | Supported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -334,7 +360,7 @@ for you.
 | Durable Objects                                                                                                                                                                                                                                                                                                                                  | Supported for local classes listed in `[[migrations]].new_classes` or `[[migrations]].new_sqlite_classes`; both map to SQLite-backed DO storage in WDL. `script_name` and renamed/deleted migrations are not supported yet. `stub.fetch()`, JSON-structured `stub.method(...args)` DO RPC, synchronous `ctx.storage.sql`, the alarm shim, ordinary WebSocket upgrade, and the native WebSocket hibernation API surface are available; platform-level session/cursor recovery remains application-owned                                                                                                                                                                                                                                 |
 | `[[workflows]]`                                                                                                                                                                                                                                                                                                                                  | Supported for workflow classes defined in the current Worker. `WorkflowEntrypoint`, `env.<BINDING>.create()`, `createBatch()`, `get()`, `status()`, `pause()`/`resume()`/`restart()`/`terminate()`, `sendEvent()`, `step.do()`/`sleep()`/`sleepUntil()`/`waitForEvent()`, retries, `NonRetryableError`, same-worker DO progress callbacks, and runtime-observed parallel/DAG steps are available. This is WDL Workflows support, not full Cloudflare Workflows parity. Instance payloads, per-turn step fan-out, and parallel step ordering are bounded; started steps must be awaited. `script_name`, cross-worker workflows, cross-worker callbacks, service-binding callbacks, and Cloudflare source-AST visualizer are unsupported |
 | Analytics Engine                                                                                                                                                                                                                                                                                                                                 | Not currently supported; deploy fails if configured                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Other Wrangler binding sections (`ai`, `ai_search`, `ai_search_namespaces`, `browser`, `containers`, `data_blobs`, `dispatch_namespaces`, `hyperdrive`, `images`, `logfwdr`, `mtls_certificates`, `pipelines`, `secrets_store_secrets`, `send_email`, `tail_consumers`, `text_blobs`, `unsafe`, `vectorize`, `version_metadata`, `wasm_modules`) | Not supported; deploy fails loudly instead of silently dropping the binding. The CLI error is the authoritative list                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Other unmapped Wrangler binding/config/policy sections (for example `ai`, `vectorize`, `hyperdrive`, `agent_memory`, `websearch`, `media`, `stream`, `ratelimits`, `vpc_services`, `cloudchamber`, `containers`, `wasm_modules`, `[site]`, `limits`, `placement`, `observability`, `workers_dev`, `pages_build_output_dir`)                            | Not supported; deploy fails loudly instead of silently dropping the binding/config. The CLI error names the rejected field; the internal rejection list tracks the bundled Wrangler schema and is not reproduced exhaustively here                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 Cron triggers and queue consumers are dispatch features. Declare them only on
 routeable Workers in tenant namespaces unless your operator gives you an
@@ -360,6 +386,13 @@ delete is a single idempotent S3 DELETE, is not retried, and does not report
 whether the object previously existed. Missing-object `HEAD` follows HTTP
 semantics and returns an empty 404; `wdl r2 objects head` reports the status
 rather than a JSON error body.
+
+`wdl r2 objects get` writes raw object bytes. Pipe or redirect stdout when you
+intend to stream bytes; on an interactive terminal, pass `--out <path>`.
+
+R2 object keys may contain leading, trailing, or doubled `/` separators; the CLI
+preserves those empty path segments. It rejects `.` and `..` segments so keys
+cannot be confused with control-plane URL traversal.
 
 ### Environment overrides
 
@@ -525,6 +558,12 @@ is treated as a new migration. There is no automatic down/rollback workflow, so
 write migrations in an expand/contract style when a Worker version rollback may
 happen.
 
+SQLite object names starting with `_cf_` are reserved by workerd,
+case-insensitively. Avoid creating or renaming D1 tables, indexes, triggers, or
+views to `_cf_*`; a migration containing that DDL can fail on a new database.
+Do not edit an already-applied migration file — add a forward migration that
+moves application data to a non-reserved name when needed.
+
 Useful commands:
 
 ```bash
@@ -538,7 +577,8 @@ wdl d1 delete main
 
 `wdl d1 execute` requires exactly one of `--sql` or `--file` (even
 `--sql ""` conflicts with `--file`), and the selected SQL source must be
-non-empty.
+non-empty. `--file` must exist, be readable, and stay inside the project root;
+missing/unreadable files are rejected before control is contacted.
 
 `wdl d1 delete` asks for confirmation by default. In automation, pass `--yes`
 only after a separate safety check.
@@ -549,6 +589,10 @@ MiB of aggregate SQL plus params, and aggregate result bodies are capped by the
 platform default of 16 MiB. Multi-statement `exec()` runs in one SQLite
 transaction; if a later statement fails, earlier statements from that `exec()`
 call are rolled back.
+
+`wdl d1 migrations status/apply` uses the control-plane JSON request parser, so
+its request body is capped at 1 MiB. Split very large migration sets or SQL
+files into smaller batches before applying.
 
 See `examples/d1-demo` for a minimal visitor counter using D1 plus a
 forward-only migration.
@@ -598,6 +642,10 @@ Supported DO surface includes `stub.fetch()`, JSON-structured
 `ctx.storage.sql`, alarms, ordinary WebSocket upgrade, and the native WebSocket
 hibernation API surface. Cross-script bindings, renamed/deleted migrations, and
 platform-level WebSocket session/cursor recovery are not currently available.
+
+For `ctx.storage.sql`, avoid application table names starting with `_cf_`;
+workerd reserves that prefix case-insensitively. `ctx.storage.deleteAll()` also
+leaves platform-owned `_cf_*` tables alone.
 
 See `examples/durable-objects-demo` for a minimal same-worker Durable Object
 counter using SQLite-backed storage.
@@ -683,13 +731,21 @@ Effect timing:
 - Worker-level secret changes on an active Worker create and promote a new
   version, so new traffic cold-loads the updated secret. Already-loaded
   historical versions can keep old values until runtime eviction or recycle.
+- Worker-level secret changes are atomic. If the active version changes during
+  the mutation, control returns `secret_mutation_contention` and the CLI asks you
+  to retry instead of leaving a stored-but-not-promoted partial update.
+- Secret-envelope errors such as `secret_encryption_unconfigured`,
+  `secret_decrypt_failed`, `invalid_envelope`, `unsupported_envelope`,
+  `unknown_kid`, or `secret_not_encrypted` mean the mutation was not written;
+  retry after the operator repairs envelope configuration or stored data.
 - Worker-level secrets can be set before the first deploy; the first deploy will
   pick them up.
 - Namespace-level secret changes are shared by every Worker in the namespace,
   but they do not bump all Workers. They take effect on the next natural
   cold-load, such as a new deploy, runtime recycle, or isolate eviction.
 - Secret keys must use environment-variable grammar, for example `STRIPE_KEY`;
-  values are limited to 64 KiB.
+  values are limited to 64 KiB and count toward the same workerLoader env budget
+  as `[vars]`.
 
 ### Queues
 
@@ -757,7 +813,7 @@ Queue behavior tenants can rely on:
 | Retry delay        | `[[queues.consumers]].retry_delay` is the default retry delay in seconds. `msg.retry({ delaySeconds })` / `batch.retryAll({ delaySeconds })` override it; `delaySeconds: 0` means immediate retry.       |
 | Attempts           | The handler sees `msg.attempts` starting at `1`. With `max_retries = N`, a message can be delivered up to `N + 1` times before dead-letter handling.                                                     |
 | Dead letter queue  | `dead_letter_queue` is honored. If omitted, failed messages use the queue's default DLQ.                                                                                                                 |
-| Batch timeout      | `max_batch_timeout` is parsed and saved for Cloudflare config compatibility, but dispatch is currently capped by `max_batch_size`; do not depend on timeout-based batch flushing.                        |
+| Batch timeout      | The CLI forwards `max_batch_timeout` values that pass basic integer delay parsing for config compatibility; WDL control enforces the tighter Cloudflare-compatible 0..60 second range. Dispatch is currently capped by `max_batch_size`; do not depend on timeout-based batch flushing. |
 | Unsupported config | `max_concurrency` is rejected during deploy instead of being silently ignored.                                                                                                                           |
 
 See `examples/queues-demo` for a single Worker that produces queue messages,
@@ -954,11 +1010,13 @@ export default {
 
 `request.signal` is **not** a reliable disconnect signal once a streaming
 response has started — workerd considers the response committed and does not
-abort the inbound Request. Use the body stream's `cancel` callback (or catch
-`controller.enqueue` throwing when the downstream reader is gone). If you need a
-side effect to survive teardown (logging, counters), register `ctx.waitUntil`
-up-front on a promise that `cancel` resolves; scheduling `waitUntil` from inside
-`cancel` races IoContext teardown.
+abort the inbound Request. Treat the body stream's `cancel` callback as
+best-effort too: pair it with periodic writes/heartbeats, catch
+`controller.enqueue` throwing when the downstream reader is gone, and keep an
+application timeout or close message for protocols that need deterministic
+cleanup. If a side effect must survive teardown (logging, counters), register
+`ctx.waitUntil` up-front; scheduling `waitUntil` from inside `cancel` races
+IoContext teardown.
 
 ```js
 const { promise: outcome, resolve: resolveOutcome } = Promise.withResolvers();
@@ -966,8 +1024,12 @@ ctx.waitUntil((async () => { console.log("client:", await outcome); })());
 
 const stream = new ReadableStream({
   async start(controller) {
-    // … enqueue chunks …
-    resolveOutcome("ended-normally");
+    try {
+      controller.enqueue(new TextEncoder().encode(": heartbeat\n\n"));
+      resolveOutcome("ended-normally");
+    } catch {
+      resolveOutcome("downstream-gone");
+    }
   },
   cancel() { resolveOutcome("cancel"); },
 });
@@ -1045,6 +1107,7 @@ wdl tail hello
 | A service binding still calls the old target behavior                  | Bindings are pinned at caller deploy time                                                                           | Redeploy the caller Worker                                                                                              |
 | `wdl tail` has no history                                              | Tail is live-only; first connect starts at the current stream tail                                                  | Start `wdl tail <worker>` before triggering the request; use single-worker `--since <stream-id>` only for manual resume |
 | Multi-worker `wdl tail` can miss logs after reconnect                  | One connection cannot preserve independent resume positions for multiple workers                                    | Use a dedicated `wdl tail <worker>` session for critical debugging                                                      |
+| `tail session_idle` / `tail session_expired`                           | Control reclaimed the live-tail stream because the client stopped reading or the session hit its lifetime cap       | The CLI reconnects automatically; if it repeats, make sure the terminal or wrapper is consuming output                  |
 | Scheduled / queue handler `console.*` output is absent from `wdl tail` | Tail shows fetch / scheduled / queue start/finish; scheduled / queue handler console does not enter the tail stream | Use `wdl tail` for trigger/outcome and the normal log platform for handler console details                              |
 
 ## Compatibility Summary

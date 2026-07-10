@@ -1,7 +1,7 @@
 import { defineCommand } from "../lib/command.js";
-import { CliError, defineCliOption, defineHiddenCliOption, formatHelp, isMain, optionHelp } from "../lib/common.js";
+import { CliError, defineCliOption, defineHiddenCliOption, formatHelp, isMain, optionHelp, unexpectedArgument } from "../lib/common.js";
 import { confirmAction } from "../lib/stdin.js";
-import { writeResult } from "../lib/output.js";
+import { escapeTerminalText, writeResult } from "../lib/output.js";
 import { formatVersionDelete, formatWorkerDelete } from "../lib/delete-format.js";
 
 const DELETE_OPTIONS = [
@@ -38,17 +38,19 @@ async function runDelete({ values, positionals, context }) {
   }
 
   if (subcommand !== "version" && subcommand !== "worker") {
-    throw new CliError(`unknown subcommand: ${subcommand}\n${usageText()}`);
+    throw new CliError(`unknown subcommand: ${escapeTerminalText(subcommand)}\n${usageText()}`);
   }
 
-  const { headers } = context.resolveControl();
-
   if (subcommand === "version") {
-    const worker = values.worker || firstArg;
-    const version = values.version || secondArg;
+    let positionalIndex = 1;
+    const worker = values.worker || positionals[positionalIndex++];
+    const version = values.version || positionals[positionalIndex++];
+    const extraArg = positionals[positionalIndex];
     if (!worker || !version) {
       throw new CliError("version delete requires <worker> <version> or --worker/--version");
     }
+    if (extraArg) throw unexpectedArgument("delete version", extraArg);
+    const { headers } = context.resolveControl();
     const body = await context.fetchJson(
       context.nsUrl("worker", worker, "versions", version),
       { method: "DELETE", headers },
@@ -60,9 +62,12 @@ async function runDelete({ values, positionals, context }) {
 
   if (subcommand === "worker") {
     const worker = values.worker || firstArg;
+    const extraArg = values.worker ? firstArg : secondArg;
     if (!worker) {
       throw new CliError("worker delete requires <worker> or --worker <name>");
     }
+    if (extraArg) throw unexpectedArgument("delete worker", extraArg);
+    const { headers } = context.resolveControl();
     const dryRun = values["dry-run"] === true;
     await confirmAction({
       yes: dryRun || values.yes === true,

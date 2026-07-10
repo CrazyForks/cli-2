@@ -22,7 +22,7 @@ If preview and production config are completely identical, do not use
 ```toml
 name = "my-worker"
 main = "src/index.js"
-compatibility_date = "2026-05-31"
+compatibility_date = "2026-06-17"
 
 [vars]
 SHARED = "top-level"
@@ -51,7 +51,7 @@ Or in `wrangler.jsonc` — same shape, JSON syntax:
 {
   "name": "my-worker",
   "main": "src/index.js",
-  "compatibility_date": "2026-05-31",
+  "compatibility_date": "2026-06-17",
   "vars": { "SHARED": "top-level", "BASE_ONLY": "always-this" },
   "assets": { "directory": "./top-public" },
   "env": {
@@ -128,14 +128,14 @@ differ:
   `[[env.<name>.workflows]]`, etc. Once an env is selected, top-level config of
   the same kind does not fall back in.
 - Inheritable: `main`, `compatibility_date` / `compatibility_flags`, `route` /
-  `routes`, `[assets]`, `[triggers]`, etc. When the env does not set them, the
-  top-level value keeps applying; when the env sets them, it overrides the
-  top-level value.
+  `routes`, `[[migrations]]`, `[assets]`, `[triggers]`, etc. When the env does
+  not set them, the top-level value keeps applying; when the env sets them, it
+  overrides the top-level value.
 
 So shared `vars` or bindings cannot live only at the top level in the
 expectation that every env inherits them; each env must declare the runtime vars
-and bindings it uses. Shared assets / cron and the like can stay at the top
-level, overridden only in the env that differs.
+and bindings it uses. Shared DO migrations, assets / cron, and the like can stay
+at the top level, overridden only in the env that differs.
 
 ## Anti-patterns
 

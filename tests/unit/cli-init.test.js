@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { main, __test__ } from "../../commands/init.js";
+import { ESC, assertNoRawTerminalControls } from "./helpers.js";
 
 const { parseArgs, validateNs, validateWorker, resolveWdlCliDep } = __test__;
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -64,6 +65,29 @@ test("parseArgs rejects unknown flags", () => {
   assert.throws(() => parseArgs(["demo", "--unknown"]), /unknown flag/);
 });
 
+test("parseArgs escapes terminal controls in argv errors", () => {
+  const bad = `bad${ESC}[2J\nFORGED\rBAD`;
+  assert.throws(
+    () => parseArgs(["demo", bad]),
+    (err) => {
+      const message = /** @type {Error} */ (err).message;
+      assertNoRawTerminalControls(message, "the error");
+      assert.match(message, /bad\\u001b\[2J\\nFORGED\\rBAD/);
+      return true;
+    },
+  );
+});
+
+test("main escapes terminal controls in project name errors", async () => {
+  const bad = `bad${ESC}[2J\nFORGED\rBAD`;
+  await withTempCwd(async () => {
+    const { exitCode, errOutput } = await captureExit(() => main([bad]));
+    assert.equal(exitCode, 1);
+    assertNoRawTerminalControls(errOutput, "project-name errors");
+    assert.match(errOutput, /project name "bad\\u001b\[2J\\nFORGED\\rBAD" must match/);
+  });
+});
+
 test("validateNs rejects names that fail the tenant grammar", () => {
   assert.throws(() => validateNs("ACME", "--ns"), /not a valid tenant namespace/);
   assert.throws(() => validateNs("admin", "--ns"), /not a valid tenant namespace/);
@@ -71,6 +95,19 @@ test("validateNs rejects names that fail the tenant grammar", () => {
   assert.throws(() => validateNs("-bad", "--ns"), /start and end with a letter or digit/);
   assert.throws(() => validateNs("bad-", "--ns"), /start and end with a letter or digit/);
   assert.throws(() => validateNs("a".repeat(64), "--ns"), /1-63 lowercase/);
+});
+
+test("validateNs escapes terminal controls in rejected namespace values", () => {
+  const bad = `bad${ESC}[2J\nFORGED\rBAD`;
+  assert.throws(
+    () => validateNs(bad, "--ns"),
+    (err) => {
+      const message = /** @type {Error} */ (err).message;
+      assertNoRawTerminalControls(message, "--ns errors");
+      assert.match(message, /--ns "bad\\u001b\[2J\\nFORGED\\rBAD" is not a valid tenant namespace/);
+      return true;
+    },
+  );
 });
 
 test("validateNs accepts lowercase + digits + hyphens", () => {
@@ -83,6 +120,19 @@ test("validateWorker rejects names that fail the worker grammar", () => {
   assert.throws(() => validateWorker("-starts-with-hyphen", "--worker"), /must match/);
   assert.throws(() => validateWorker("contains.dot", "--worker"), /must match/);
   assert.throws(() => validateWorker("contains/slash", "--worker"), /must match/);
+});
+
+test("validateWorker escapes terminal controls in rejected worker values", () => {
+  const bad = `bad${ESC}[2J\nFORGED\rBAD`;
+  assert.throws(
+    () => validateWorker(bad, "--worker"),
+    (err) => {
+      const message = /** @type {Error} */ (err).message;
+      assertNoRawTerminalControls(message, "--worker errors");
+      assert.match(message, /--worker "bad\\u001b\[2J\\nFORGED\\rBAD" must match/);
+      return true;
+    },
+  );
 });
 
 test("validateWorker accepts letters digits underscores and hyphens", () => {
@@ -134,7 +184,7 @@ test("init scaffolds files with --ns and --worker", async () => {
 
     const wranglerJsonc = readFileSync(path.join(projectDir, "wrangler.jsonc"), "utf8");
     assert.match(wranglerJsonc, /"name":\s*"site"/);
-    assert.match(wranglerJsonc, /"compatibility_date":\s*"2026-05-31"/);
+    assert.match(wranglerJsonc, /"compatibility_date":\s*"2026-06-17"/);
     assert.doesNotMatch(wranglerJsonc, /"env"/);
 
     const indexJs = readFileSync(path.join(projectDir, "src", "index.js"), "utf8");

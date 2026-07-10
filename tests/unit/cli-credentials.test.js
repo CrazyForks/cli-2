@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { isTokenStoreDisabled, loadCliControlEnv, loadCliDotEnv, protectedEnvKeys, resolveControlContext, resolveControlUrl, resolveNamespace } from "../../lib/credentials.js";
+import { isTokenStoreDisabled, loadCliControlEnv, loadCliDotEnv, protectedEnvKeys, resolveControlContext, resolveControlUrl, resolveNamespace, warnIfInsecureControlUrl } from "../../lib/credentials.js";
+import { ESC, assertNoRawTerminalControls } from "./helpers.js";
 
 test("isTokenStoreDisabled honors the flag and WDL_TOKEN_STORE=off", () => {
   assert.equal(isTokenStoreDisabled({}, false), false);
@@ -31,6 +32,18 @@ test("resolveControlUrl strips trailing slashes from flags and env", () => {
 
 test("resolveControlUrl requires a configured endpoint", () => {
   assert.throws(() => resolveControlUrl({}, {}), /No control URL configured/);
+});
+
+test("resolveControlUrl escapes invalid endpoint diagnostics", () => {
+  assert.throws(
+    () => resolveControlUrl({ "control-url": `ftp://ctl.test/${ESC}[2J\u009b` }, {}),
+    (err) => {
+      const message = /** @type {Error} */ (err).message;
+      assert.match(message, /Invalid control URL/);
+      assertNoRawTerminalControls(message, "control URL errors");
+      return true;
+    }
+  );
 });
 
 test("resolveControlUrl accepts bare control hosts as https URLs", () => {
@@ -80,6 +93,35 @@ test("resolveControlContext centralizes admin token and headers", () => {
     () => resolveControlContext({}, {}),
     /Missing admin token/
   );
+});
+
+test("warnIfInsecureControlUrl escapes control endpoint text before warning", () => {
+  /** @type {string[]} */
+  const warnings = [];
+  warnIfInsecureControlUrl(
+    "http://localhost/\u001b[31m",
+    (line) => warnings.push(line),
+    { CONTROL_CONNECT_HOST: "evil.example\nsecond" },
+  );
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /http:\/\/localhost\/\\u001b\[31m/);
+  assert.match(warnings[0], /CONTROL_CONNECT_HOST=evil\.example\\nsecond/);
+  assert.equal(warnings[0].includes("\u001b"), false);
+  assert.equal(warnings[0].includes("\n"), false);
+});
+
+test("warnIfInsecureControlUrl treats local CONTROL_CONNECT_HOST host:port overrides as local", () => {
+  for (const connectHost of ["localhost:18080", "dev.local:18080", "[::1]:18080", "http://localhost:18080"]) {
+    /** @type {string[]} */
+    const warnings = [];
+    warnIfInsecureControlUrl(
+      "http://admin.test:8080",
+      (line) => warnings.push(line),
+      { CONTROL_CONNECT_HOST: connectHost },
+    );
+    assert.deepEqual(warnings, []);
+  }
 });
 
 test("resolveNamespace prefers explicit namespace before WDL_NS", () => {
@@ -156,6 +198,46 @@ test("loadCliDotEnv rejects malformed quoted values", () => {
       () => loadCliDotEnv(emptyEnv(), file),
       /Invalid \.env value: missing closing quote/
     );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadCliDotEnv escapes invalid section names", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wdl-env-section-"));
+  const file = path.join(dir, ".env");
+  try {
+    writeFileSync(file, `[BAD${ESC}[2J\u009b]\nADMIN_TOKEN=tok\n`);
+    assert.throws(
+      () => loadCliDotEnv(emptyEnv(), file),
+      (err) => {
+        const message = /** @type {Error} */ (err).message;
+        assert.match(message, /invalid section name/);
+        assertNoRawTerminalControls(message, "section errors");
+        return true;
+      }
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadCliDotEnv ignores non-WDL dotenv lines it cannot parse", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wdl-env-"));
+  const file = path.join(dir, ".env");
+  try {
+    writeFileSync(file, [
+      "ADMIN_TOKEN=tok",
+      "PRIVATE_KEY=\"-----BEGIN PRIVATE KEY-----",
+      "not a KEY=value continuation",
+      "-----END PRIVATE KEY-----\"",
+      "CONTROL_URL=https://ctl.example",
+    ].join("\n"));
+
+    const env = emptyEnv();
+    assert.deepEqual(loadCliDotEnv(env, file), ["ADMIN_TOKEN", "CONTROL_URL"]);
+    assert.equal(env.ADMIN_TOKEN, "tok");
+    assert.equal(env.CONTROL_URL, "https://ctl.example");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -469,6 +551,26 @@ test("loadCliDotEnv ignores a missing file", () => {
   const env = emptyEnv();
   assert.deepEqual(loadCliDotEnv(env, "/tmp/wdl-missing-env-file"), []);
   assert.deepEqual(env, {});
+});
+
+test("loadCliDotEnv wraps unreadable .env filesystem errors", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "wdl-env-unreadable-"));
+  try {
+    const file = path.join(dir, `.env${ESC}[2J\nFORGED\rBAD`);
+    mkdirSync(file);
+    assert.throws(
+      () => loadCliDotEnv(emptyEnv(), file),
+      (err) => {
+        const message = /** @type {Error} */ (err).message;
+        assert.match(message, /Cannot read \.env file/);
+        assert.match(message, /\.env\\u001b\[2J\\nFORGED\\rBAD/);
+        assertNoRawTerminalControls(message, ".env read errors");
+        return true;
+      }
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("loadCliControlEnv drops a .env control endpoint when the token is from the shell", () => {

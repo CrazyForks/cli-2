@@ -2,6 +2,7 @@ import path from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 import { readMigrationFiles, readSql } from "../lib/d1-files.js";
 import {
+  formatWranglerConfigShadowWarning,
   loadWranglerConfig,
   parseD1DatabasesFromCfg,
   resolveWranglerConfig,
@@ -15,9 +16,9 @@ import {
 } from "../lib/d1-format.js";
 import { LONG_CONTROL_TIMEOUT_MS } from "../lib/control-fetch.js";
 import { defineCommand } from "../lib/command.js";
-import { CliError, defineCliOption, formatHelp, isMain, isPathInside, optionHelp } from "../lib/common.js";
+import { CliError, defineCliOption, formatHelp, isMain, isPathInside, optionHelp, unexpectedArgument } from "../lib/common.js";
 import { confirmAction } from "../lib/stdin.js";
-import { writeResult } from "../lib/output.js";
+import { escapeTerminalText, formatDiagnosticValue, writeResult } from "../lib/output.js";
 
 const D1_EXECUTE_MODES = ["all", "raw", "run", "exec"];
 
@@ -67,19 +68,21 @@ async function runD1({ values, positionals, context }) {
   const ns = context.resolveNamespace();
   if (!subcommand || !ns) throw new CliError(usageText());
 
-  const { headers } = context.resolveControl();
-
   if (subcommand === "migrations") {
     const action = firstArg;
     const databaseRef = positionals[2];
+    const extraArg = positionals[3];
     if (!action || !databaseRef) {
       throw new CliError("d1 migrations requires <list|status|apply> <databaseName|databaseId>");
     }
+    if (extraArg) throw unexpectedArgument(`d1 migrations ${action}`, extraArg);
     await runMigrationsCommand({ action, databaseRef, context });
     return;
   }
 
   if (subcommand === "list") {
+    if (firstArg) throw unexpectedArgument("d1 list", firstArg);
+    const { headers } = context.resolveControl();
     const body = /** @type {Parameters<typeof formatD1List>[0]} */ (
       await context.fetchJson(context.nsUrl("d1", "databases"), { headers }, "list d1 databases")
     );
@@ -90,6 +93,8 @@ async function runD1({ values, positionals, context }) {
   if (subcommand === "create") {
     const databaseName = firstArg;
     if (!databaseName) throw new CliError("d1 create requires <databaseName>");
+    if (positionals[2]) throw unexpectedArgument("d1 create", positionals[2]);
+    const { headers } = context.resolveControl();
     const body = /** @type {{ namespace?: string, databaseId?: string, databaseName?: string }} */ (
       await context.fetchJson(context.nsUrl("d1", "databases"), {
         method: "POST",
@@ -108,6 +113,8 @@ async function runD1({ values, positionals, context }) {
   if (subcommand === "delete") {
     const databaseRef = firstArg;
     if (!databaseRef) throw new CliError("d1 delete requires <databaseName|databaseId>");
+    if (positionals[2]) throw unexpectedArgument("d1 delete", positionals[2]);
+    const { headers } = context.resolveControl();
     await confirmAction({
       yes: values.yes === true,
       stdin,
@@ -130,6 +137,7 @@ async function runD1({ values, positionals, context }) {
   if (subcommand === "execute") {
     const databaseRef = firstArg;
     if (!databaseRef) throw new CliError("d1 execute requires <databaseName|databaseId>");
+    if (positionals[2]) throw unexpectedArgument("d1 execute", positionals[2]);
     const sql = readSql(values, context.cwd);
     const mode = values.mode || "all";
     if (!D1_EXECUTE_MODES.includes(mode)) {
@@ -151,6 +159,7 @@ async function runD1({ values, positionals, context }) {
       if (!Array.isArray(parsed)) throw new CliError("--params must be a JSON array");
       params = parsed;
     }
+    const { headers } = context.resolveControl();
     const body = /** @type {Parameters<typeof formatD1Execute>[0]} */ (
       await context.fetchJson(context.nsUrl("d1", "databases", databaseRef, "query"), {
         method: "POST",
@@ -167,13 +176,16 @@ async function runD1({ values, positionals, context }) {
     return;
   }
 
-  throw new CliError(`unknown d1 subcommand: ${subcommand}\n${usageText()}`);
+  throw new CliError(`unknown d1 subcommand: ${escapeTerminalText(subcommand)}\n${usageText()}`);
 }
 
 /** @param {{ action: string, databaseRef: string, context: import("../lib/command.js").CommandContext }} arg */
 async function runMigrationsCommand({ action, databaseRef, context }) {
-  const { env, stdout, cwd } = context;
+  const { env, stdout, cwd, warn } = context;
   const values = /** @type {D1Flags} */ (context.values);
+  if (!["list", "status", "apply"].includes(action)) {
+    throw new CliError(`unknown d1 migrations subcommand: ${escapeTerminalText(action)}`);
+  }
   const { headers } = context.resolveControl();
   const migrationsBase = context.nsUrl("d1", "databases", databaseRef, "migrations");
 
@@ -186,12 +198,12 @@ async function runMigrationsCommand({ action, databaseRef, context }) {
   }
 
   if (action === "status") {
-    const migrations = loadLocalMigrations({ values, env, cwd, databaseRef });
+    const migrations = loadLocalMigrations({ values, env, cwd, databaseRef, warn });
     const body = /** @type {Parameters<typeof formatD1MigrationStatus>[0]} */ (
       await context.fetchJson(`${migrationsBase}/status`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ migrations: migrations.map(({ sql: _sql, ...rest }) => rest) }),
+        body: serializeMigrationStatusRequest(migrations),
       }, "show d1 migration status")
     );
     writeResult(values.json === true, body, () => formatD1MigrationStatus(body), stdout);
@@ -199,7 +211,7 @@ async function runMigrationsCommand({ action, databaseRef, context }) {
   }
 
   if (action === "apply") {
-    const migrations = loadLocalMigrations({ values, env, cwd, databaseRef });
+    const migrations = loadLocalMigrations({ values, env, cwd, databaseRef, warn });
     const body = /** @type {Parameters<typeof formatD1MigrationApply>[0]} */ (
       await context.fetchJson(`${migrationsBase}/apply`, {
         method: "POST",
@@ -211,12 +223,18 @@ async function runMigrationsCommand({ action, databaseRef, context }) {
     writeResult(values.json === true, body, () => formatD1MigrationApply(body), stdout);
     return;
   }
-
-  throw new CliError(`unknown d1 migrations subcommand: ${action}`);
 }
 
 /**
- * @typedef {{ values: D1Flags, env: NodeJS.ProcessEnv, cwd: string, databaseRef: string }} MigrationsDirArgs
+ * @param {import("../lib/d1-files.js").MigrationFile[]} migrations
+ * @returns {string}
+ */
+export function serializeMigrationStatusRequest(migrations) {
+  return JSON.stringify({ migrations: migrations.map(({ sql: _sql, ...rest }) => rest) });
+}
+
+/**
+ * @typedef {{ values: D1Flags, env: NodeJS.ProcessEnv, cwd: string, databaseRef: string, warn?: (line: string) => void }} MigrationsDirArgs
  */
 
 /**
@@ -231,11 +249,11 @@ async function runMigrationsCommand({ action, databaseRef, context }) {
 // status and apply share the same local-migrations contract: resolve the dir,
 // read the .sql files, and fail loudly on an empty/mis-pointed dir.
 /** @param {MigrationsDirArgs} arg */
-function loadLocalMigrations({ values, env, cwd, databaseRef }) {
-  const { dir, display } = resolveMigrationsDir({ values, env, cwd, databaseRef });
+function loadLocalMigrations({ values, env, cwd, databaseRef, warn }) {
+  const { dir, display } = resolveMigrationsDir({ values, env, cwd, databaseRef, warn });
   const migrations = readMigrationFiles(dir);
   if (migrations.length === 0) {
-    throw new CliError(`no .sql migration files found in ${display}`);
+    throw new CliError(`no .sql migration files found in ${escapeTerminalText(display)}`);
   }
   return migrations;
 }
@@ -244,7 +262,7 @@ function loadLocalMigrations({ values, env, cwd, databaseRef }) {
  * @param {MigrationsDirArgs} arg
  * @returns {{ dir: string, display: string }}
  */
-function resolveMigrationsDir({ values, env, cwd, databaseRef }) {
+function resolveMigrationsDir({ values, env, cwd, databaseRef, warn }) {
   if (values.dir) {
     return {
       dir: resolveExplicitMigrationsDir({ cwd, dir: values.dir }),
@@ -268,6 +286,9 @@ function resolveMigrationsDir({ values, env, cwd, databaseRef }) {
     throw new CliError(message);
   }
 
+  const shadowWarning = formatWranglerConfigShadowWarning(loaded);
+  if (shadowWarning) warn?.(`warning: ${shadowWarning}`);
+
   const configRel = path.basename(loaded.path);
   const selectedEnv = values.env || env.CLOUDFLARE_ENV || null;
   /** @type {{ d1_databases?: unknown }} */
@@ -288,7 +309,7 @@ function resolveMigrationsDir({ values, env, cwd, databaseRef }) {
   const byName = [];
   for (const [idx, entry] of entries.entries()) {
     if (entry.migrations_dir != null && (typeof entry.migrations_dir !== "string" || !entry.migrations_dir.trim())) {
-      throw new CliError(`${configRel}: [[d1_databases]] ${entry.binding || idx}: migrations_dir must be a string`);
+      throw new CliError(`${escapeTerminalText(configRel)}: [[d1_databases]] ${escapeTerminalText(entry.binding || idx)}: migrations_dir must be a string`);
     }
     if (entry.database_id === databaseRef) {
       byId.push(entry);
@@ -301,11 +322,11 @@ function resolveMigrationsDir({ values, env, cwd, databaseRef }) {
   const matches = byId.length > 0 ? byId : byName;
 
   if (matches.length > 1) {
-    throw new CliError(`${configRel}: multiple [[d1_databases]] entries match ${JSON.stringify(databaseRef)}`);
+    throw new CliError(`${escapeTerminalText(configRel)}: multiple [[d1_databases]] entries match ${formatDiagnosticValue(databaseRef)}`);
   }
   if (matches.length === 0) {
     throw new CliError(
-      `${configRel}: no matching [[d1_databases]] entry for ${JSON.stringify(databaseRef)}; ` +
+      `${escapeTerminalText(configRel)}: no matching [[d1_databases]] entry for ${formatDiagnosticValue(databaseRef)}; ` +
       "use a configured database_name/database_id or pass --dir explicitly"
     );
   }
@@ -348,7 +369,8 @@ function resolveConfiguredMigrationsDir({ configDir, migrationsDir, configRel, b
   const resolved = existsSync(candidate) ? realpathSync(candidate) : candidate;
   if (!isPathInside(root, resolved)) {
     throw new CliError(
-      `${configRel}: [[d1_databases]] ${binding}: migrations_dir must stay inside the project`
+      `${escapeTerminalText(configRel)}: [[d1_databases]] ${escapeTerminalText(binding)}: ` +
+      `migrations_dir must stay inside the project (got ${formatDiagnosticValue(migrationsDir)})`
     );
   }
   return resolved;

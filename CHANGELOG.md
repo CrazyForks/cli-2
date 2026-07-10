@@ -1,5 +1,88 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- `wdl init`, examples, and docs now default new Wrangler configs to
+  `compatibility_date = "2026-06-17"` for the documented feature baseline.
+- `wdl deploy` now follows Wrangler config priority
+  (`wrangler.json`, `wrangler.jsonc`, `wrangler.toml`) and parses both JSON
+  filenames with Wrangler's JSONC syntax; the control plane remains canonical
+  for runtime/workerd bundle errors, while the CLI still rejects cheap local
+  cases like Python Worker modules and ambiguous runtime env name collisions
+  between `[vars]`, explicit bindings, and the implicit `ASSETS` binding.
+  Deploy also fails fast on unmapped Wrangler runtime/deploy keys such as
+  `[site]`, `workers_dev`, `pages_build_output_dir`, `observability`, `limits`,
+  and `placement` instead of silently dropping them.
+- `wdl deploy` resolves Wrangler from `WDL_WRANGLER_BIN`, the Worker project's
+  local install, the CLI package's bundled dependency, then `PATH`; `npx` stays
+  opt-in via `WDL_ALLOW_NPX_WRANGLER=1`.
+- Control requests now include a `wdl-cli/<version>` User-Agent and buffer JSON
+  control responses up to 16 MiB by default.
+- `CONTROL_CONNECT_HOST` now accepts `host:port`, bracketed or bare IPv6, and
+  `http://` / `https://` override URLs, while rejecting blank hosts, non-http
+  schemes, and invalid ports before opening a control connection. URL schemes
+  choose the default TCP port; request transport still follows `CONTROL_URL`.
+- `wdl tail` now recognizes control-initiated `session_idle` /
+  `session_expired` stream recycling and reconnects without presenting it as an
+  unknown warning.
+- `wdl doctor --strict` now exits non-zero when any local or remote readiness
+  check fails, while the default `wdl doctor` remains report-only.
+- `wdl r2` preserves empty object-key path segments while still rejecting `.`
+  and `..` segments, validates list `--limit` locally, and requires `--out`
+  when `objects get` would otherwise write raw bytes to an interactive terminal.
+- `wdl workflows status --step-limit` now requires `--include-steps`, matching
+  the control request it affects.
+- Top-level help for successful requests now prints to stdout, and
+  `wdl help <command>` prints that command's help.
+- When multiple Wrangler config files exist, deploy and D1 migrations now warn
+  which file is selected by Wrangler priority and which lower-priority files are
+  ignored; `wdl doctor` reports the same detail.
+
+### Fixed
+
+- Control connection failures, invalid 2xx JSON responses, unreadable
+  project `.env` files, unreadable `wdl d1 execute --file` inputs, and
+  unexpected positional arguments now fail with CLI errors instead of raw Node
+  errors or silently ignored input.
+- `wdl d1 migrations apply` now rejects symlinked `.sql` migration files instead
+  of silently dropping them.
+- `wdl deploy` now renders deploy warnings attached to failed upload responses,
+  including missing caller-secret hints, before reporting the control error.
+- Invalid `.assetsignore` patterns now report the offending pattern instead of
+  a bare `RegExp` error.
+- Project `.env` files with non-WDL dotenv extensions no longer break every WDL
+  command; the four WDL-consumed keys remain strictly parsed.
+- `wdl secret put/delete` no longer reports obsolete deferred-promote warnings;
+  current worker-secret mutations either promote atomically or return a retryable
+  control error.
+- Secret mutation failures now add command-specific guidance for env-budget,
+  contention, and secret-envelope errors, including that the failed mutation was
+  not written.
+- `wdl token list` now escapes credential labels and endpoints before rendering
+  the human table output.
+
+### Security
+
+- `wdl token` credential writes now use a temp-file plus rename so an existing
+  credentials symlink is replaced rather than followed.
+- `wdl token set/use/rm` now serialize credential-store read-modify-write
+  mutations with a recoverable lock, and credential-store temporary filenames
+  are unguessable.
+- Credential-store read and write failures now escape filesystem details before
+  rendering CLI errors.
+- `wdl tail` now caps SSE line buffering to avoid unbounded memory growth on a
+  malformed stream.
+- `wdl deploy` now registers process-exit and SIGINT/SIGTERM cleanup for its
+  temporary Wrangler config file.
+
+### Tests
+
+- Live CLI integration now exercises assets, Durable Objects, queues, cron
+  registration, and `wdl deploy --env` in addition to the existing command
+  surface.
+
 ## 1.3.1
 
 ### Fixed

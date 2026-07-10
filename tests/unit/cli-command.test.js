@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { defineCommand } from "../../lib/command.js";
 import { CliError, defineCliOption } from "../../lib/common.js";
-import { response } from "./helpers.js";
+import { ESC, assertNoRawTerminalControls, response } from "./helpers.js";
 
 /** @typedef {Parameters<typeof defineCommand>[0]} CommandSpec */
 /** @typedef {import("../../lib/command.js").CommandContext} CommandContext */
@@ -35,6 +35,27 @@ test("defineCommand exposes name/summary metadata and the parse schema", () => {
   assert.deepEqual(meta, { name: "workers", summary: "List workers.", autoloadEnv: true });
   // The dispatcher pre-scans argv with this schema (ns overlay, help alias).
   assert.deepEqual(Object.keys(parseOptions).toSorted(), ["help", "ns"]);
+});
+
+test("defineCommand direct runner escapes parseArgs errors", async () => {
+  const bad = `--bad${ESC}[2J\nFORGED\rBAD`;
+  const cmd = define({
+    options: ["ns"],
+    usage: () => "usage",
+    run: () => {
+      throw new Error("run body should not be called");
+    },
+  });
+
+  await assert.rejects(
+    () => cmd.run([bad]),
+    (err) => {
+      assert(err instanceof CliError);
+      assertNoRawTerminalControls(err.message, "direct runner errors");
+      assert.match(err.message, /--bad\\u001b\[2J\\nFORGED\\rBAD/);
+      return true;
+    },
+  );
 });
 
 test("defineCommand exposes autoloadEnv metadata", () => {
@@ -160,13 +181,13 @@ test("context.fetchJson fetches with the given init and parses JSON", async () =
     run: ({ context }) => context.fetchJson("http://x/y", { headers: { a: "b" } }, "do thing"),
   });
   const body = await cmd.run([], {
-    env: {},
+    env: { CONTROL_CONNECT_HOST: "127.0.0.1:18080" },
     /** @param {string} url @param {import("../../lib/control-fetch.js").ControlFetchInit} init */
     controlFetch: async (url, init) => { got = { url, init }; return response({ ok: 1 }); },
   });
   assert.deepEqual(body, { ok: 1 });
   assert.equal(got.url, "http://x/y");
-  assert.deepEqual(got.init, { headers: { a: "b" } });
+  assert.deepEqual(got.init, { headers: { a: "b" }, env: { CONTROL_CONNECT_HOST: "127.0.0.1:18080" } });
 });
 
 test("context.fetchJson throws a CliError on a non-2xx response", async () => {
@@ -205,15 +226,48 @@ test("context.fetchJson escapes structured error context keys", async () => {
   );
 });
 
+test("context.fetchJson renders reserved module arrays from control errors", async () => {
+  const cmd = define({
+    options: [],
+    usage: () => "",
+    run: ({ context }) => context.fetchJson("http://x", {}, "deploy"),
+  });
+  await assert.rejects(
+    () => cmd.run([], {
+      env: {},
+      controlFetch: async () => response({
+        error: "worker_code_invalid",
+        message: "reserved injected module name",
+        reserved_modules: ["_wdl-wrapper.js", "_wdl-init.js"],
+      }, 400),
+    }),
+    (err) => {
+      assert(err instanceof CliError);
+      assert.match(err.message, /reserved_modules=\["_wdl-wrapper\.js","_wdl-init\.js"\]/);
+      return true;
+    },
+  );
+});
+
 test("context.fetchStream returns the raw response after a status check", async () => {
   const ok = response("bytes");
+  let got = /** @type {import("../../lib/control-fetch.js").ControlFetchInit} */ (
+    /** @type {unknown} */ (null)
+  );
   const cmd = define({
     options: [],
     usage: () => "",
     run: ({ context }) => context.fetchStream("http://x", { method: "HEAD" }, "get"),
   });
-  const res = await cmd.run([], { env: {}, controlFetch: async () => ok });
+  const res = await cmd.run([], {
+    env: { CONTROL_CONNECT_HOST: "127.0.0.1:18080" },
+    controlFetch: async (/** @type {string} */ _url, /** @type {import("../../lib/control-fetch.js").ControlFetchInit} */ init) => {
+      got = init;
+      return ok;
+    },
+  });
   assert.equal(res, ok);
+  assert.deepEqual(got, { method: "HEAD", env: { CONTROL_CONNECT_HOST: "127.0.0.1:18080" } });
 
   const bad = define({
     options: [],

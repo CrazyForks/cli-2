@@ -10,7 +10,7 @@
 
 - API key、token、签名密钥，凡是不该出现在 git diff 或构建产物里的东西。
 
-非敏感配置（问候字符串、功能开关、公开 URL）放 `wrangler.jsonc` / `wrangler.toml` 的 `[vars]`。
+非敏感配置（问候字符串、功能开关、公开 URL）放 `wrangler.json` / `wrangler.jsonc` / `wrangler.toml` 的 `[vars]`。
 
 ## 设置
 
@@ -48,10 +48,15 @@ worker 级 secret  >  命名空间级 secret  >  [vars]
 
 修改 worker 级 secret 会创建并 promote 新版本，但已经加载的历史版本可能继续持有旧值，直到 runtime eviction 或 recycle。需要严格撤销时，应同时考虑禁用旧凭据。
 
+Worker 级 secret mutation 是原子的：如果更新期间 active version 变化，control 会返回 `secret_mutation_contention`，CLI 会要求重试，而不是留下"已存储但未 promote"的半成功状态。Namespace secret mutation 在 retained worker metadata 持续变化时也可能返回 `namespace_secret_mutation_contention`。
+
+如果 secret mutation 返回 `secret_encryption_unconfigured`、`secret_decrypt_failed`、`invalid_envelope`、`unsupported_envelope`、`unknown_kid` 或 `secret_not_encrypted`，这次 mutation 没有写入。这类错误需要运维侧修复 secret-envelope 配置或已存储 envelope 数据；等运维确认修复后再重试。
+
 ## 约束
 
 - Key 必须符合环境变量命名规范：`[A-Z_][A-Z0-9_]*` —— 例如 `STRIPE_KEY`、`API_TOKEN`、`SIGNING_SECRET`。
 - 值上限 64 KiB。
+- Secrets 会和 `[vars]`、binding metadata 一起计入 workerLoader env budget。如果 mutation 返回 `worker_env_too_large`，减少 env payload；如果错误点名 retained version，redeploy/delete 该版本。
 
 ## Worker 端读取
 
@@ -67,7 +72,7 @@ export default {
 ## 反模式
 
 - ❌ `[vars] = { STRIPE_KEY = "sk_live_..." }`。`[vars]` 会进 bundle。用 `wdl secret put`。
-- ❌ 把第三方 API token 硬编码到 `.env` 或 `wrangler.jsonc`。用 `wdl secret put` 推送。
+- ❌ 把第三方 API token 硬编码到 `.env` 或 Wrangler config。用 `wdl secret put` 推送。
 - ❌ 在没有先 `wdl secret list` 并跟用户确认时，给 `wdl secret delete` 加 `--yes`。
 - ❌ 用 `echo "$VAL" |` 而不是 `printf '%s' "$VAL" |`。`echo` 会在末尾加换行符，被一并写进 secret 值里。
 - ❌ 期望命名空间级 secret 立即给每个 worker 生效。它不会 —— 下次冷启动时才生效。需要"立刻生效"用 worker 级 secret。

@@ -74,7 +74,8 @@ When unsure which value won, run `wdl config explain`; to confirm which control
 the token actually reaches, plus the principal, platform version, and URL hints,
 run `wdl whoami`; for baseline local and remote diagnostics, run `wdl doctor`.
 When the control plane supports `/whoami`, `doctor` verifies the remote token,
-principal namespace, platform version, and CLI compatibility.
+principal namespace, platform version, and CLI compatibility. Use
+`wdl doctor --strict` in CI when a failed check should make the job fail.
 
 For runtime secrets (distinct from `ADMIN_TOKEN`), see
 [secrets.md](./secrets.md).
@@ -133,6 +134,11 @@ embedded in that JSON request at deploy time; a large static file set can hit
 the control request cap first. Put bulk or frequently changing files in R2, not
 in assets.
 
+The control plane enforces a headroomed 1 MiB workerd `workerLoader` environment
+budget (1,040,384 bytes usable). Large `[vars]`, secrets, binding metadata, or
+retained versions can fail with `worker_env_too_large`; reduce the env payload,
+or redeploy/delete the retained version named in the error when one is shown.
+
 ## Environment overrides
 
 When the wrangler config has `[env.<name>]` sections, `--env <name>` (or
@@ -151,12 +157,17 @@ names like `my-worker-preview`; WDL does not append that suffix. See
 
 ## Supported / unsupported wrangler configuration
 
-**Supported:** `name`, `main`, `compatibility_date`/`flags`, `[vars]`,
+When multiple Wrangler config files exist, the CLI follows Wrangler's priority:
+`wrangler.json`, then `wrangler.jsonc`, then `wrangler.toml`.
+Both JSON filenames use Wrangler's JSONC syntax, including comments and
+trailing commas.
+
+**Supported:** `name`, `main`, `compatibility_date` / `compatibility_flags`, `[vars]`,
 `[[kv_namespaces]]`, `[[d1_databases]]`, `[[durable_objects.bindings]]`,
 `[[workflows]]`, `[[r2_buckets]]`, `[assets] directory`, `[triggers] crons`,
 `[[triggers.schedules]]` (with timezone, a platform extension),
 `[[queues.producers]]` / `[[queues.consumers]]`, `[[services]]`,
-`[[platform_bindings]]`, `[env.<name>]`.
+`[[platform_bindings]]`, `[[exports]]`, `[env.<name>]`.
 
 **Unsupported (deploy fails):** Analytics Engine. Durable Objects supports
 same-worker classes only; `script_name` and rename/delete migrations are not
@@ -164,8 +175,16 @@ implemented yet. WDL Workflows supports only workflow classes defined in the
 current Worker — not full Cloudflare Workflows parity; `script_name`,
 cross-worker workflows, cross-worker callbacks, service-binding callbacks, and
 the Cloudflare source-AST visualizer are not supported. `route` / `routes` are
-supported only when the operator enables them. `assets.run_worker_first` is
-silently ignored.
+supported only when the operator enables them. Python Workers modules, workerd
+experimental compatibility flags, and WDL-reserved injected module names are
+rejected during deploy: the CLI fails fast on local `.py` modules, and the
+control plane is canonical for workerd compatibility and bundle-shape policy.
+Top-level or selected-environment Wrangler runtime/deploy config fields and
+sections that WDL would otherwise ignore are also rejected by the CLI, including
+legacy `[site]` Workers Sites, `workers_dev`, `pages_build_output_dir`,
+`observability`, `limits`, `placement`, and other unsupported binding/config
+fields or sections named in the error.
+`assets.run_worker_first` is silently ignored.
 
 Cron triggers and queue consumers are runtime dispatch features; declare them
 only on routeable tenant Workers. Workers selected through
@@ -191,10 +210,17 @@ Deleting a worker does **not** delete R2 data — see [r2.md](./r2.md).
 | `401 unknown_token: unauthorized`                                | The token is invalid for this control plane / namespace. Re-check `ADMIN_TOKEN`.                                     |
 | `[vars] must be an object`                                       | Use a `[vars]` table/object; arrays are invalid.                                                                     |
 | `[vars] <NAME>: only string/number/boolean values are supported` | Remove nested values; move sensitive strings to a secret.                                                            |
+| `binding name collision: <NAME>`                                 | `[vars]`, explicit bindings, or the implicit `ASSETS` binding reused a runtime env name. Rename one of them.        |
+| `experimental_compat_flag_unsupported`                           | Remove the experimental workerd compatibility flag.                                                                  |
+| `python_workers_unsupported`                                     | Python Workers are not supported by WDL; remove Python Worker modules. The CLI also fails fast on local `.py` modules. |
+| `worker_env_too_large`                                           | Reduce `[vars]`, secrets, or binding metadata; redeploy/delete any retained version named in the error.              |
+| `worker_code_too_large`                                          | Reduce generated Worker code size or split the worker.                                                               |
+| `worker_code_invalid`                                            | Fix the Worker bundle shape reported by the control plane, including WDL-reserved injected module names.             |
 | `wrangler build failed`                                          | Run `npx wrangler deploy --dry-run` inside the project and fix it there.                                             |
 | Deploy succeeds but promote fails                                | Custom host or service-binding target validation issue; check the binding targets.                                   |
 | Worker URL returns 404                                           | The URL is missing the `/<worker-name>` segment.                                                                     |
 | `wdl tail` has no history                                        | Tail is live-only; open `wdl tail <worker>` before triggering the request.                                           |
+| `tail session_idle` / `tail session_expired`                     | Control reclaimed the live-tail stream; the CLI reconnects automatically unless the reconnect cap is reached.        |
 | Namespace secret did not take effect                             | NS-level secrets do not force-bump workers; redeploy once or use a worker-level secret.                              |
 | Service binding still hits the old target                        | Bindings are pinned at caller deploy time; redeploy the caller.                                                      |
 

@@ -15,7 +15,7 @@ visible to anyone with read access.
   or build output.
 
 Put non-sensitive configuration (greeting strings, feature flags, public URLs)
-in `[vars]` in `wrangler.jsonc` / `wrangler.toml`.
+in `[vars]` in `wrangler.json` / `wrangler.jsonc` / `wrangler.toml`.
 
 ## Set
 
@@ -61,11 +61,26 @@ already-loaded historical versions can keep holding the old value until runtime
 eviction or recycle. When strict revocation matters, also consider disabling the
 old credential.
 
+Worker-level secret mutations are atomic: if the active version changes during
+the update, control returns `secret_mutation_contention` and the CLI asks you to
+retry instead of leaving a stored-but-not-promoted partial update. Namespace
+secret mutations can similarly return `namespace_secret_mutation_contention`
+when retained worker metadata keeps changing.
+
+If a secret mutation returns `secret_encryption_unconfigured`,
+`secret_decrypt_failed`, `invalid_envelope`, `unsupported_envelope`,
+`unknown_kid`, or `secret_not_encrypted`, the mutation was not written. These
+are operator-side secret-envelope configuration or stored-data repair problems;
+retry after the operator reports the envelope issue repaired.
+
 ## Constraints
 
 - Keys must follow environment-variable grammar: `[A-Z_][A-Z0-9_]*` — e.g.
   `STRIPE_KEY`, `API_TOKEN`, `SIGNING_SECRET`.
 - Values are limited to 64 KiB.
+- Secrets count toward the workerLoader env budget together with `[vars]` and
+  binding metadata. If a mutation returns `worker_env_too_large`, reduce the
+  env payload or redeploy/delete the retained version named in the error.
 
 ## Reading in the Worker
 
@@ -82,7 +97,7 @@ export default {
 
 - ❌ `[vars] = { STRIPE_KEY = "sk_live_..." }`. `[vars]` goes into the bundle.
   Use `wdl secret put`.
-- ❌ Hardcoding third-party API tokens in `.env` or `wrangler.jsonc`. Push them
+- ❌ Hardcoding third-party API tokens in `.env` or Wrangler config. Push them
   with `wdl secret put`.
 - ❌ Adding `--yes` to `wdl secret delete` without running `wdl secret list`
   first and confirming with the user.

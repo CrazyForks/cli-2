@@ -17,6 +17,7 @@ import * as tokenCmd from "../commands/token.js";
 import { isHelpAlias } from "../lib/command.js";
 import { commonCliOptions, formatHelp, handleCliError, isMain } from "../lib/common.js";
 import { flagSet, isTokenStoreDisabled, loadCliControlEnv } from "../lib/credentials.js";
+import { escapeTerminalText } from "../lib/output.js";
 import { currentCliVersion } from "../lib/package-info.js";
 import { tokenStoreReader } from "../lib/token-store.js";
 
@@ -29,7 +30,8 @@ const REGISTRY = [initCmd, deployCmd, secretCmd, workersCmd, deleteCmd, d1Cmd, r
 const ALIASES = { secrets: "secret" };
 
 /** @type {Record<string, CommandModule>} */
-const COMMANDS = Object.fromEntries(REGISTRY.map((c) => [c.meta.name, c]));
+const COMMANDS = Object.create(null);
+for (const c of REGISTRY) COMMANDS[c.meta.name] = c;
 for (const [alias, target] of Object.entries(ALIASES)) COMMANDS[alias] = COMMANDS[target];
 
 // The pre-scan below needs each command's flag schema; a missing one would
@@ -55,7 +57,19 @@ for (const c of REGISTRY) {
 export async function main(argv = process.argv.slice(2), deps = {}) {
   const [command, ...rest] = argv;
 
-  if (!command || command === "-h" || command === "--help" || command === "help") {
+  if (command === "help") {
+    if (rest.length === 0) {
+      usage(0);
+      return;
+    }
+    if (rest.length === 1 && Object.hasOwn(COMMANDS, rest[0])) {
+      return await COMMANDS[rest[0]].main(["--help"]);
+    }
+    console.error(`error: unknown help topic: ${escapeTerminalText(rest.join(" "))}`);
+    usage(1);
+    return;
+  }
+  if (!command || command === "-h" || command === "--help") {
     usage(command ? 0 : 1);
     return;
   }
@@ -63,12 +77,12 @@ export async function main(argv = process.argv.slice(2), deps = {}) {
     console.log(currentCliVersion());
     return;
   }
-  const commandModule = COMMANDS[command];
-  if (!commandModule) {
-    console.error(`error: unknown command: ${command}`);
+  if (!Object.hasOwn(COMMANDS, command)) {
+    console.error(`error: unknown command: ${escapeTerminalText(command)}`);
     usage(1);
     return;
   }
+  const commandModule = COMMANDS[command];
 
   const env = deps.env || process.env;
   const scanned = scanCommandArgs(commandModule, rest);
@@ -136,10 +150,12 @@ function usage(exitCode) {
     (aliasesByTarget[target] ??= []).push(alias);
   }
   const width = Math.max(...REGISTRY.map((c) => c.meta.name.length)) + 1;
-  console.error(formatHelp({
+  const write = exitCode === 0 ? console.log : console.error;
+  write(formatHelp({
     usage: [
       "wdl <command> [args] [options]",
       "wdl <command> --help",
+      "wdl help <command>",
       "wdl --version",
     ],
     description: "Manage deployments, diagnostics, secrets, workers, D1, R2, and Workflows for a WDL control plane.",

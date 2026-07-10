@@ -1,11 +1,30 @@
 // Shared fixtures for the CLI unit tests. Not a test file itself (the test
 // runner only globs cli-*.test.js).
 
+import assert from "node:assert/strict";
+
+export const ESC = String.fromCharCode(27);
+
 /**
  * A recorded control-plane call: the URL and the init passed to controlFetch.
  * Shared by the tests that assert on what mockDeps recorded.
  * @typedef {{ url: string, init: import("../../lib/control-fetch.js").ControlFetchInit }} ControlCall
  */
+
+// Human output may intentionally contain LF/TAB for layout; hostile fixtures use
+// sentinel text after those bytes so the helper still catches forged lines.
+/** @param {string} text @param {string} [target] */
+export function assertNoRawTerminalControls(text, target = "output") {
+  for (const ch of text) {
+    if (ch === "\n" || ch === "\t") continue;
+    const code = ch.charCodeAt(0);
+    if ((code >= 0x00 && code <= 0x1f) || (code >= 0x7f && code <= 0x9f)) {
+      assert.fail(`raw terminal control U+${code.toString(16).padStart(4, "0")} must not reach ${target}`);
+    }
+  }
+  assert.doesNotMatch(text, new RegExp(ESC), `raw ESC must not reach ${target}`);
+  assert.doesNotMatch(text, /\nFORGED|\rBAD/, `raw line controls must not reach ${target}`);
+}
 
 // A minimal fetch Response stand-in. Accepts an object (JSON) or string body
 // and exposes json()/text()/arrayBuffer() so it works for control-plane JSON
