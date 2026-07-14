@@ -56,6 +56,10 @@ unmapped top-level or selected-env Wrangler runtime/deploy keys (`[site]`,
 `workers_dev`, `pages_build_output_dir`, `observability`, `limits`,
 `placement`, etc.), and ambiguous runtime `env` name collisions between
 `[vars]`, explicit bindings, and the implicit `ASSETS` binding.
+WDL-only `[[exports]]`, `[[platform_bindings]]`, `[[triggers.schedules]]`, and
+`[[services]].ns` are parsed by the CLI and removed from Wrangler's temporary
+bundle config; other fields retain their existing Wrangler passthrough
+behavior. Wrangler's object-shaped declarative `exports` config is unsupported.
 
 Never recommend setting `CONTROL_CONNECT_HOST` outside local development: it
 overrides the TCP target the admin token connects to (Host header + TLS SNI

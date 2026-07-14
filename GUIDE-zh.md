@@ -252,6 +252,8 @@ Wrangler 能打包、但 WDL 不能运行的形状由 control plane 作为 canon
 | Analytics Engine | 暂不支持，部署时会拒绝 |
 | 其他未映射的 Wrangler 绑定/配置/策略段（例如 `ai`、`vectorize`、`hyperdrive`、`agent_memory`、`websearch`、`media`、`stream`、`ratelimits`、`vpc_services`、`cloudchamber`、`containers`、`wasm_modules`、`[site]`、`limits`、`placement`、`observability`、`workers_dev`、`pages_build_output_dir`） | 不支持；部署时显式报错，不会静默丢弃绑定/配置。CLI 报错会点名被拒字段；内部拒绝列表跟随打包的 Wrangler schema，这里不复刻完整清单 |
 
+WDL 会自行解析 `[[exports]]`、`[[platform_bindings]]`、`[[triggers.schedules]]` 和 `[[services]].ns`，并从传给 Wrangler bundler 的临时配置中移除这些私有扩展；其它字段保持既有的 Wrangler 透传行为。WDL 不支持 Wrangler 对象形态的 declarative `exports` 配置。
+
 Cron triggers 和 queue consumers 是运行时 dispatch 能力。除非管理方明确给了 reserved namespace，否则只应声明在 tenant namespace 里的可路由 Worker 上。通过 `[[platform_bindings]]` 选择的 Worker 是冷加载的平台能力，不是公开/runtime dispatch 目标，不能声明 cron triggers 或 queue consumers。
 
 R2 custom metadata key 读取时会按 HTTP header 语义归一成小写。R2 object head 会暴露 HTTP metadata 和 custom metadata，所以鉴权上与读取 object body 同级，不开放给 observer 角色。R2 支持条件请求、range GET 和 `list({ include: [...] })` metadata hydration。 `list({ include })` 会在并发上限内额外发起 HEAD；只有列表结果确实需要 metadata 时再打开。
@@ -656,7 +658,17 @@ service = "billing-worker"
 entrypoint = "Billing"
 ```
 
-跨 namespace 调用需要**目标** Worker 在自己的 `[[exports]]` 里授权你要调用的 entrypoint（默认 fetch handler 用 `entrypoint = "default"`，命名 entrypoint 用类名）：
+跨 namespace 调用时，调用方用 WDL 的 `ns` 扩展选择目标 namespace：
+
+```toml
+[[services]]
+binding = "BILLING"
+service = "billing-worker"
+ns = "shared-services"
+entrypoint = "Billing"
+```
+
+然后还需要**目标** Worker 在自己的 `[[exports]]` 里授权调用方 namespace 要调用的 entrypoint（默认 fetch handler 用 `entrypoint = "default"`，命名 entrypoint 用类名）：
 
 ```toml
 [[exports]]

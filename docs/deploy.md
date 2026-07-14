@@ -169,6 +169,12 @@ trailing commas.
 `[[queues.producers]]` / `[[queues.consumers]]`, `[[services]]`,
 `[[platform_bindings]]`, `[[exports]]`, `[env.<name>]`.
 
+WDL parses `[[exports]]`, `[[platform_bindings]]`,
+`[[triggers.schedules]]`, and `[[services]].ns` itself and removes these private
+extensions from the temporary config passed to the Wrangler bundler. Other
+fields retain their existing Wrangler passthrough behavior. Wrangler's
+object-shaped declarative `exports` configuration is not supported by WDL.
+
 **Unsupported (deploy fails):** Analytics Engine. Durable Objects supports
 same-worker classes only; `script_name` and rename/delete migrations are not
 implemented yet. WDL Workflows supports only workflow classes defined in the

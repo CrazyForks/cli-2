@@ -362,6 +362,12 @@ binding metadata, or retained versions can fail with `worker_env_too_large`.
 | Analytics Engine                                                                                                                                                                                                                                                                                                                                 | Not currently supported; deploy fails if configured                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Other unmapped Wrangler binding/config/policy sections (for example `ai`, `vectorize`, `hyperdrive`, `agent_memory`, `websearch`, `media`, `stream`, `ratelimits`, `vpc_services`, `cloudchamber`, `containers`, `wasm_modules`, `[site]`, `limits`, `placement`, `observability`, `workers_dev`, `pages_build_output_dir`)                            | Not supported; deploy fails loudly instead of silently dropping the binding/config. The CLI error names the rejected field; the internal rejection list tracks the bundled Wrangler schema and is not reproduced exhaustively here                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
+WDL parses `[[exports]]`, `[[platform_bindings]]`,
+`[[triggers.schedules]]`, and `[[services]].ns` itself and removes these private
+extensions from the temporary config passed to the Wrangler bundler. Other
+fields retain their existing Wrangler passthrough behavior. Wrangler's
+object-shaped declarative `exports` configuration is not supported by WDL.
+
 Cron triggers and queue consumers are dispatch features. Declare them only on
 routeable Workers in tenant namespaces unless your operator gives you an
 explicit reserved namespace. Workers selected through `[[platform_bindings]]`
@@ -912,10 +918,21 @@ service = "billing-worker"
 entrypoint = "Billing"
 ```
 
-Cross-namespace calls require the **target** Worker to authorize your namespace
-on the entrypoint you bind. The target declares this in its own `[[exports]]`
-(use `entrypoint = "default"` for the default fetch handler, or the class name
-for a named entrypoint):
+For a cross-namespace call, the caller selects the target namespace with WDL's
+`ns` extension:
+
+```toml
+[[services]]
+binding = "BILLING"
+service = "billing-worker"
+ns = "shared-services"
+entrypoint = "Billing"
+```
+
+The **target** Worker must then authorize the caller's namespace on the
+entrypoint being bound. The target declares this in its own `[[exports]]` (use
+`entrypoint = "default"` for the default fetch handler, or the class name for a
+named entrypoint):
 
 ```toml
 [[exports]]

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+
+- `wdl deploy` no longer passes WDL-only `[[exports]]`,
+  `[[platform_bindings]]`, `[[triggers.schedules]]`, or `[[services]].ns` to
+  Wrangler's temporary bundle config. This avoids the `exports` schema
+  collision in Wrangler 4.107+ while preserving the fields in the WDL deploy
+  manifest.
+
 ## 1.4.0
 
 ### Changed

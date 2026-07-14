@@ -13,6 +13,7 @@ import {
   collectAssets,
   collectModules,
   collectRoutes,
+  createWranglerBundleConfig,
   formatWranglerConfigShadowWarning,
   installTempFileCleanup,
   loadWranglerConfig,
@@ -1442,6 +1443,67 @@ test("resolveWranglerConfig drops __proto__ keys instead of rewriting the merged
   assert.deepEqual(cfg.vars, { A: "1" });
 });
 
+test("createWranglerBundleConfig projects WDL extensions without mutating source config", () => {
+  const rawCfg = {
+    name: "demo",
+    main: "src/index.js",
+    build: { command: "npm run build" },
+    vars: { MODE: "top" },
+    triggers: {
+      crons: ["*/5 * * * *"],
+      schedules: [{ cron: "0 9 * * 1-5", timezone: "Asia/Shanghai" }],
+    },
+    services: [{
+      binding: "AUTH",
+      service: "auth-worker",
+      entrypoint: "Auth",
+      ns: "shared",
+      props: { role: "caller" },
+      remote: true,
+    }],
+    exports: [{ entrypoint: "Auth", allowed_callers: ["acme"] }],
+    platform_bindings: [{ binding: "PAYMENT", platform: "STRIPE" }],
+    env: {
+      staging: {
+        define: { BUILD_ENV: '"staging"' },
+        triggers: {
+          crons: ["0 * * * *"],
+          schedules: [{ cron: "0 8 * * *", timezone: "Europe/London" }],
+        },
+        services: [{ binding: "API", service: "api-worker", ns: "backend", remote: false }],
+        exports: [{ entrypoint: "default", allowed_callers: ["*"] }],
+        platform_bindings: [{ binding: "SEARCH", platform: "SEARCH" }],
+      },
+    },
+  };
+  const original = structuredClone(rawCfg);
+
+  const projected = createWranglerBundleConfig(rawCfg);
+
+  assert.deepEqual(rawCfg, original);
+  assert.equal(projected.name, "wdl-bundle-tmp");
+  assert.equal(projected.exports, undefined);
+  assert.equal(projected.platform_bindings, undefined);
+  assert.deepEqual(projected.build, { command: "npm run build" });
+  assert.deepEqual(projected.vars, { MODE: "top" });
+  assert.deepEqual(projected.triggers, { crons: ["*/5 * * * *"] });
+  assert.deepEqual(projected.services, [{
+    binding: "AUTH",
+    service: "auth-worker",
+    entrypoint: "Auth",
+    props: { role: "caller" },
+    remote: true,
+  }]);
+  const projectedEnv = /** @type {Record<string, Record<string, unknown>>} */ (projected.env);
+  assert.deepEqual(projectedEnv.staging.define, { BUILD_ENV: '"staging"' });
+  assert.deepEqual(projectedEnv.staging.triggers, { crons: ["0 * * * *"] });
+  assert.deepEqual(projectedEnv.staging.services, [
+    { binding: "API", service: "api-worker", remote: false },
+  ]);
+  assert.equal(projectedEnv.staging.exports, undefined);
+  assert.equal(projectedEnv.staging.platform_bindings, undefined);
+});
+
 test("validateUnsupportedWranglerConfig: workflows are supported at top-level and selected env", () => {
   assert.doesNotThrow(() => validateUnsupportedWranglerConfig({
     name: "demo",
@@ -1746,6 +1808,13 @@ test("parseExportsFromCfg: missing allowed_callers rejected", () => {
   assert.throws(
     () => parseExportsFromCfg({ exports: [{ entrypoint: "Public" }] }),
     /allowed_callers must be an array of strings/
+  );
+});
+
+test("parseExportsFromCfg: rejects Wrangler declarative exports objects", () => {
+  assert.throws(
+    () => parseExportsFromCfg({ exports: { Room: { type: "durable-object", storage: "sqlite" } } }),
+    /Wrangler declarative exports objects are not supported/
   );
 });
 
@@ -2133,6 +2202,23 @@ test("runDeployCommand resolves cwd-relative project dir and WDL_NS fallback", a
         'binding = "ORDER_WORKFLOW"',
         'class_name = "OrderWorkflow"',
         "",
+        "[[services]]",
+        'binding = "AUTH"',
+        'service = "auth-worker"',
+        'ns = "shared"',
+        "",
+        "[[exports]]",
+        'entrypoint = "default"',
+        'allowed_callers = ["acme"]',
+        "",
+        "[[platform_bindings]]",
+        'binding = "PAYMENT"',
+        'platform = "STRIPE"',
+        "",
+        "[[triggers.schedules]]",
+        'cron = "0 9 * * 1-5"',
+        'timezone = "Asia/Shanghai"',
+        "",
         "[[migrations]]",
         'tag = "v1"',
         'new_classes = ["Room"]',
@@ -2211,10 +2297,20 @@ test("runDeployCommand resolves cwd-relative project dir and WDL_NS fallback", a
       DB: { type: "d1", databaseId: "cf-id" },
       BUCKET: { type: "r2", bucketName: "uploads" },
       ROOMS: { type: "do", className: "Room" },
+      AUTH: { type: "service", service: "auth-worker", ns: "shared" },
     });
     assert.deepEqual(manifest.vars, { HELLO: "world" });
     assert.deepEqual(manifest.workflows, [
       { name: "order-workflow", binding: "ORDER_WORKFLOW", className: "OrderWorkflow" },
+    ]);
+    assert.deepEqual(manifest.crons, [
+      { cron: "0 9 * * 1-5", timezone: "Asia/Shanghai" },
+    ]);
+    assert.deepEqual(manifest.exports, [
+      { entrypoint: "default", allowedCallers: ["acme"] },
+    ]);
+    assert.deepEqual(manifest.platformBindings, [
+      { binding: "PAYMENT", platform: "STRIPE" },
     ]);
     assert.equal(manifest.compatibilityDate, "2026-06-17");
 
@@ -2269,11 +2365,12 @@ test("runDeployCommand sanitizes wrangler.name via temp --config so mixed-case w
       name: "Mixed-Case-Worker",
       main: "src/index.js",
       vars: { GREETING: "hi" },
+      exports: [{ entrypoint: "default", allowed_callers: ["*"] }],
     }));
     writeFileSync(path.join(dir, "wrangler.toml"), 'name = "old"\nmain = "old.js"\n');
 
     let tmpConfigSeen = null;
-    let tmpConfigContentAtExec = /** @type {{ name?: string, main?: string, vars?: unknown } | null} */ (null);
+    let tmpConfigContentAtExec = /** @type {{ name?: string, main?: string, vars?: unknown, exports?: unknown } | null} */ (null);
     /** @type {RecordedFetch[]} */
     const fetchCalls = [];
     /** @type {string[]} */
@@ -2308,6 +2405,7 @@ test("runDeployCommand sanitizes wrangler.name via temp --config so mixed-case w
     assert.equal(tmpConfigContentAtExec.name, "wdl-bundle-tmp");
     assert.equal(tmpConfigContentAtExec.main, "src/index.js");
     assert.deepEqual(tmpConfigContentAtExec.vars, { GREETING: "hi" });
+    assert.equal(tmpConfigContentAtExec.exports, undefined);
     assert.ok(tmpConfigSeen);
     assert.match(path.basename(tmpConfigSeen), /^\.wrangler\.wdl-tmp-[a-f0-9-]+\.json$/);
     assert.notEqual(tmpConfigSeen, path.join(dir, ".wrangler.wdl-tmp.json"));
